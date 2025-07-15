@@ -15,7 +15,7 @@
 #include <vtkImageThreshold.h>
 #include <vtkImageMathematics.h>
 #include <vtkMarchingCubes.h>
-#include <vtkImageResize.h>
+#include <vtkImageReslice.h>
 #include <vtkAlgorithmOutput.h>
 
 BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
@@ -43,7 +43,7 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
     }
 
     try {
-        qDebug() << "开始处理区块" << label << "的surface数据";
+        qDebug() << "开始处理区块" << label << "的surface数据（仅使用标签数据）";
         
         // 创建阈值过滤器，提取当前标签的区域
         auto threshold = vtkSmartPointer<vtkImageThreshold>::New();
@@ -60,52 +60,8 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             return;
         }
 
-        // 检查数据尺寸是否匹配
-        int mriDims[3], maskDims[3];
-        mriData->GetDimensions(mriDims);
-        thresholdOutput->GetDimensions(maskDims);
-        
-        qDebug() << "区块" << label << "MRI尺寸:" << mriDims[0] << "x" << mriDims[1] << "x" << mriDims[2];
-        qDebug() << "区块" << label << "掩码尺寸:" << maskDims[0] << "x" << maskDims[1] << "x" << maskDims[2];
-
-        vtkImageData* resizedMask = thresholdOutput;
-        
-        // 如果尺寸不匹配，需要重采样掩码数据
-        if (mriDims[0] != maskDims[0] || mriDims[1] != maskDims[1] || mriDims[2] != maskDims[2]) {
-            qDebug() << "区块" << label << "尺寸不匹配，进行重采样";
-            
-            auto resizer = vtkSmartPointer<vtkImageResize>::New();
-            resizer->SetInputData(thresholdOutput);
-            resizer->SetOutputDimensions(mriDims[0], mriDims[1], mriDims[2]);
-            resizer->SetInterpolationModeToNearestNeighbor(); // 使用最近邻插值保持标签值
-            resizer->Update();
-            
-            resizedMask = resizer->GetOutput();
-            qDebug() << "区块" << label << "重采样完成";
-        }
-
-        // 将掩码与MRI数据相乘，得到该区块的MRI数据
-        auto multiply = vtkSmartPointer<vtkImageMathematics>::New();
-        multiply->SetOperationToMultiply();
-        multiply->SetInput1Data(mriData);
-        multiply->SetInput2Data(resizedMask);
-        multiply->Update();
-
-        // 检查乘法结果
-        vtkImageData* multiplyOutput = multiply->GetOutput();
-        if (!multiplyOutput) {
-            qDebug() << "区块" << label << "数据融合失败";
-            return;
-        }
-
-        // 检查输出数据的有效性
-        if (multiplyOutput->GetNumberOfPoints() == 0) {
-            qDebug() << "区块" << label << "没有有效数据点";
-            return;
-        }
-
         // 获取数据范围
-        double* range = multiplyOutput->GetScalarRange();
+        double* range = thresholdOutput->GetScalarRange();
         if (range[1] <= range[0]) {
             qDebug() << "区块" << label << "数据范围无效: [" << range[0] << ", " << range[1] << "]";
             return;
@@ -113,10 +69,10 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
 
         // 使用Marching Cubes生成等值面
         auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
-        marchingCubes->SetInputData(multiplyOutput);
+        marchingCubes->SetInputData(thresholdOutput);
         
-        // 设置阈值为数据范围的30%
-        double threshold_value = range[0] + (range[1] - range[0]) * 0.3;
+        // 设置阈值为0.5（介于0和1之间）
+        double threshold_value = 0.5;
         marchingCubes->SetValue(0, threshold_value);
         marchingCubes->Update();
         
@@ -125,8 +81,8 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
         // 设置到surface映射器
         surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
         
-        // 计算质心
-        calculateCentroid();
+        // 简单设置质心为原点（暂时）
+        centroid = QVector3D(0, 0, 0);
         
         qDebug() << "区块" << label << "surface数据设置完成";
 
