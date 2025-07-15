@@ -8,6 +8,11 @@
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <vtkCamera.h>
+#include <vtkImageData.h>
+#include <vtkMarchingCubes.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkActor.h>
+#include <vtkProperty.h>
 
 /**
  * @brief NiftiVisualizationAPI的私有实现类
@@ -126,22 +131,124 @@ void NiftiVisualizationAPI::processRegions()
     Q_D(NiftiVisualizationAPI);
     d->niftiManager->processRegions();
     
-    // 暂时不添加Volume到渲染器，避免VTK崩溃
-    qDebug() << "区块处理完成，暂时跳过渲染器添加";
-    
-    /* 暂时注释掉可能导致崩溃的代码
-    // 处理完成后，确保所有Volume都已添加到渲染器
+    // 处理完成后，确保所有surface actor都已添加到渲染器
     if (d->renderer) {
         QList<int> labels = d->niftiManager->getAllLabels();
         for (int label : labels) {
             auto* volume = d->niftiManager->getRegionVolume(label);
             if (volume) {
-                d->renderer->AddVolume(volume->getVolume());
+                d->renderer->AddActor(volume->getSurfaceActor());
                 d->renderer->AddActor(volume->getCentroidSphere());
             }
         }
+        
+        // 重置相机并渲染
+        d->renderer->ResetCamera();
+        if (d->renderer->GetRenderWindow()) {
+            d->renderer->GetRenderWindow()->Render();
+        }
     }
-    */
+    
+    qDebug() << "区块处理完成，surface渲染已添加";
+}
+
+void NiftiVisualizationAPI::testSimpleVolumeRendering()
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    if (!d->renderer) {
+        qDebug() << "渲染器未设置，无法进行体绘制测试";
+        return;
+    }
+    
+    qDebug() << "开始简单体绘制测试";
+    
+    try {
+        // 清理之前的渲染对象
+        d->renderer->RemoveAllViewProps();
+        
+        // 测试MRI数据
+        if (d->niftiManager->hasMriData()) {
+            qDebug() << "开始渲染MRI数据";
+            renderSingleVolume(d->niftiManager->getMriImage(), QColor(255, 255, 255), "MRI");
+        }
+        
+        // 测试标签数据
+        if (d->niftiManager->hasLabelData()) {
+            qDebug() << "开始渲染标签数据";
+            renderSingleVolume(d->niftiManager->getLabelImage(), QColor(255, 0, 0), "Label");
+        }
+        
+        // 重置相机并渲染
+        d->renderer->ResetCamera();
+        if (d->renderer->GetRenderWindow()) {
+            d->renderer->GetRenderWindow()->Render();
+        }
+        
+        qDebug() << "简单体绘制测试完成";
+    }
+    catch (const std::exception& e) {
+        qDebug() << "体绘制测试失败:" << e.what();
+    }
+    catch (...) {
+        qDebug() << "体绘制测试失败: 未知错误";
+    }
+}
+
+void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QColor& color, const QString& name)
+{
+    NiftiVisualizationAPIPrivate* d = d_func();
+    
+    if (!imageData || !d->renderer) {
+        qDebug() << "数据或渲染器为空，跳过" << name << "渲染";
+        return;
+    }
+    
+    try {
+        qDebug() << "开始渲染" << name << "数据 (使用surface渲染)";
+        
+        // 获取数据范围以设置合适的阈值
+        double* range = imageData->GetScalarRange();
+        qDebug() << name << "数据范围: [" << range[0] << ", " << range[1] << "]";
+        
+        // 使用Marching Cubes算法生成等值面
+        auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
+        marchingCubes->SetInputData(imageData);
+        
+        // 根据数据范围设置合适的阈值
+        double threshold = range[0] + (range[1] - range[0]) * 0.3;  // 使用30%的阈值
+        marchingCubes->SetValue(0, threshold);
+        qDebug() << name << "使用阈值: " << threshold;
+        
+        marchingCubes->Update();
+        
+        // 创建mapper
+        auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+        mapper->SetInputConnection(marchingCubes->GetOutputPort());
+        
+        // 创建actor
+        auto actor = vtkSmartPointer<vtkActor>::New();
+        actor->SetMapper(mapper);
+        
+        // 设置材质属性
+        actor->GetProperty()->SetColor(color.redF(), color.greenF(), color.blueF());
+        actor->GetProperty()->SetOpacity(1.0);  // 完全不透明
+        actor->GetProperty()->SetAmbient(0.3);   // 环境光
+        actor->GetProperty()->SetDiffuse(0.7);   // 漫反射
+        actor->GetProperty()->SetSpecular(0.2);  // 镜面反射
+        actor->GetProperty()->SetSpecularPower(10);
+        
+        // 添加到渲染器
+        d->renderer->AddActor(actor);
+        
+        qDebug() << name << "数据渲染完成 (surface渲染)";
+    }
+    catch (const std::exception& e) {
+        qDebug() << name << "渲染失败:" << e.what();
+    }
+    catch (...) {
+        qDebug() << name << "渲染失败: 未知错误";
+    }
 }
 
 void NiftiVisualizationAPI::clearRegions()

@@ -4,13 +4,6 @@
 #include <cmath>
 
 // VTK头文件
-#include <vtkVolume.h>
-#include <vtkVolumeProperty.h>
-#include <vtkSmartVolumeMapper.h>
-#include <vtkGPUVolumeRayCastMapper.h>
-#include <vtkFixedPointVolumeRayCastMapper.h>
-#include <vtkColorTransferFunction.h>
-#include <vtkPiecewiseFunction.h>
 #include <vtkImageData.h>
 #include <vtkPointData.h>
 #include <vtkDataArray.h>
@@ -21,6 +14,8 @@
 #include <vtkProperty.h>
 #include <vtkImageThreshold.h>
 #include <vtkImageMathematics.h>
+#include <vtkMarchingCubes.h>
+#include <vtkImageResize.h>
 #include <vtkAlgorithmOutput.h>
 
 BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
@@ -30,7 +25,7 @@ BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
     , visible(true)
     , centroid(0, 0, 0)
 {
-    initializeVolume();
+    initializeSurfaceActor();
     initializeCentroidSphere();
     qDebug() << "BrainRegionVolume" << label << "初始化";
 }
@@ -48,17 +43,8 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
     }
 
     try {
-        qDebug() << "开始处理区块" << label << "的体数据";
+        qDebug() << "开始处理区块" << label << "的surface数据";
         
-        // 暂时跳过复杂的数据处理，只做基本检查
-        qDebug() << "区块" << label << "跳过体数据处理，避免崩溃";
-        
-        // 简单设置质心为原点
-        centroid = QVector3D(0, 0, 0);
-        
-        qDebug() << "区块" << label << "体数据设置完成（简化版）";
-        
-        /* 暂时注释掉可能导致崩溃的代码
         // 创建阈值过滤器，提取当前标签的区域
         auto threshold = vtkSmartPointer<vtkImageThreshold>::New();
         threshold->SetInputData(maskData);
@@ -74,11 +60,35 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             return;
         }
 
+        // 检查数据尺寸是否匹配
+        int mriDims[3], maskDims[3];
+        mriData->GetDimensions(mriDims);
+        thresholdOutput->GetDimensions(maskDims);
+        
+        qDebug() << "区块" << label << "MRI尺寸:" << mriDims[0] << "x" << mriDims[1] << "x" << mriDims[2];
+        qDebug() << "区块" << label << "掩码尺寸:" << maskDims[0] << "x" << maskDims[1] << "x" << maskDims[2];
+
+        vtkImageData* resizedMask = thresholdOutput;
+        
+        // 如果尺寸不匹配，需要重采样掩码数据
+        if (mriDims[0] != maskDims[0] || mriDims[1] != maskDims[1] || mriDims[2] != maskDims[2]) {
+            qDebug() << "区块" << label << "尺寸不匹配，进行重采样";
+            
+            auto resizer = vtkSmartPointer<vtkImageResize>::New();
+            resizer->SetInputData(thresholdOutput);
+            resizer->SetOutputDimensions(mriDims[0], mriDims[1], mriDims[2]);
+            resizer->SetInterpolationModeToNearestNeighbor(); // 使用最近邻插值保持标签值
+            resizer->Update();
+            
+            resizedMask = resizer->GetOutput();
+            qDebug() << "区块" << label << "重采样完成";
+        }
+
         // 将掩码与MRI数据相乘，得到该区块的MRI数据
         auto multiply = vtkSmartPointer<vtkImageMathematics>::New();
         multiply->SetOperationToMultiply();
         multiply->SetInput1Data(mriData);
-        multiply->SetInput2Data(thresholdOutput);
+        multiply->SetInput2Data(resizedMask);
         multiply->Update();
 
         // 检查乘法结果
@@ -94,15 +104,31 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             return;
         }
 
-        // 设置到体映射器
-        volumeMapper->SetInputData(multiplyOutput);
-        
-        // 延迟更新，避免在数据未准备好时更新
-        // volumeMapper->Update();
+        // 获取数据范围
+        double* range = multiplyOutput->GetScalarRange();
+        if (range[1] <= range[0]) {
+            qDebug() << "区块" << label << "数据范围无效: [" << range[0] << ", " << range[1] << "]";
+            return;
+        }
 
+        // 使用Marching Cubes生成等值面
+        auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
+        marchingCubes->SetInputData(multiplyOutput);
+        
+        // 设置阈值为数据范围的30%
+        double threshold_value = range[0] + (range[1] - range[0]) * 0.3;
+        marchingCubes->SetValue(0, threshold_value);
+        marchingCubes->Update();
+        
+        qDebug() << "区块" << label << "数据范围: [" << range[0] << ", " << range[1] << "], 阈值: " << threshold_value;
+
+        // 设置到surface映射器
+        surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
+        
         // 计算质心
         calculateCentroid();
-        */
+        
+        qDebug() << "区块" << label << "surface数据设置完成";
 
     }
     catch (const std::exception& e) {
@@ -115,9 +141,10 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
 
 void BrainRegionVolume::calculateCentroid()
 {
-    if (!volumeMapper->GetInput()) return;
+    if (!surfaceMapper->GetInput()) return;
 
-    vtkImageData* imageData = volumeMapper->GetInput();
+    // 从surface mapper获取输入数据
+    vtkImageData* imageData = vtkImageData::SafeDownCast(surfaceMapper->GetInputDataObject(0, 0));
     vtkDataArray* scalars = imageData->GetPointData()->GetScalars();
     if (!scalars) return;
 
@@ -171,7 +198,9 @@ void BrainRegionVolume::updateVisibility(bool visible)
     if (this->visible == visible) return;
 
     this->visible = visible;
-    volume->SetVisibility(visible);
+    if (surfaceActor) {
+        surfaceActor->SetVisibility(visible);
+    }
     centroidSphere->SetVisibility(false); // 质心球体始终隐藏
 
     qDebug() << "区块" << label << "可见性:" << visible;
@@ -183,7 +212,7 @@ void BrainRegionVolume::updateColor(const QColor& color)
     if (this->color == color) return;
 
     this->color = color;
-    updateVolumeColorTransfer();
+    updateSurfaceColor();
 
     qDebug() << "区块" << label << "颜色更新为:" << color.name();
     emit colorChanged(label, color);
@@ -203,38 +232,34 @@ double BrainRegionVolume::distanceToCamera(vtkCamera* camera) const
 
 void BrainRegionVolume::setOpacity(double opacity)
 {
-    if (volumeProperty) {
-        auto opacityFunction = volumeProperty->GetScalarOpacity();
-        if (opacityFunction) {
-            opacityFunction->RemoveAllPoints();
-            opacityFunction->AddPoint(0, 0.0);
-            opacityFunction->AddPoint(255, opacity);
-        }
-        volume->Modified();
+    if (surfaceActor) {
+        surfaceActor->GetProperty()->SetOpacity(opacity);
     }
 }
 
 void BrainRegionVolume::setSampleDistance(double distance)
 {
-    // VTK 8.2中vtkVolumeMapper没有SetSampleDistance方法
-    // 使用vtkSmartVolumeMapper的特定方法
-    auto smartMapper = vtkSmartVolumeMapper::SafeDownCast(volumeMapper);
-    if (smartMapper) {
-        smartMapper->SetSampleDistance(distance);
-    }
+    // Surface渲染不需要采样距离设置
+    Q_UNUSED(distance)
+    qDebug() << "Surface渲染不支持setSampleDistance";
 }
 
-void BrainRegionVolume::initializeVolume()
+void BrainRegionVolume::initializeSurfaceActor()
 {
-    qDebug() << "区块" << label << "开始初始化（暂时禁用体绘制）";
+    qDebug() << "区块" << label << "开始初始化surface actor";
     
-    // 完全跳过体绘制初始化，避免VTK RayCast崩溃
     try {
-        // 创建空的体对象，不设置映射器
-        volume = vtkSmartPointer<vtkVolume>::New();
-        volume->SetVisibility(false);
+        // 创建surface映射器
+        surfaceMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
         
-        qDebug() << "区块" << label << "基础对象初始化完成（无体绘制）";
+        // 创建surface actor
+        surfaceActor = vtkSmartPointer<vtkActor>::New();
+        surfaceActor->SetMapper(surfaceMapper);
+        
+        // 设置基本属性
+        setupSurfaceProperty();
+        
+        qDebug() << "区块" << label << "surface actor初始化完成";
     }
     catch (const std::exception& e) {
         qDebug() << "区块" << label << "初始化失败:" << e.what();
@@ -265,57 +290,33 @@ void BrainRegionVolume::initializeCentroidSphere()
     centroidSphere->SetVisibility(false);
 }
 
-void BrainRegionVolume::setupVolumeProperty()
+void BrainRegionVolume::setupSurfaceProperty()
 {
-    // 设置颜色传递函数
-    auto colorFunction = vtkSmartPointer<vtkColorTransferFunction>::New();
-    updateVolumeColorTransfer();
-    volumeProperty->SetColor(colorFunction);
-
-    // 设置不透明度传递函数
-    auto opacityFunction = vtkSmartPointer<vtkPiecewiseFunction>::New();
-    opacityFunction->AddPoint(0, 0.0);
-    opacityFunction->AddPoint(255, 0.8);
-    volumeProperty->SetScalarOpacity(opacityFunction);
-
-    // 设置渲染模式
-    volumeProperty->SetInterpolationTypeToLinear();
-    volumeProperty->ShadeOn();
-    volumeProperty->SetAmbient(0.4);
-    volumeProperty->SetDiffuse(0.6);
-    volumeProperty->SetSpecular(0.2);
-}
-
-void BrainRegionVolume::updateVolumeColorTransfer()
-{
-    auto colorFunction = volumeProperty->GetRGBTransferFunction();
-    if (!colorFunction) {
-        colorFunction = vtkSmartPointer<vtkColorTransferFunction>::New();
-        volumeProperty->SetColor(colorFunction);
+    if (surfaceActor) {
+        // 设置基本颜色
+        updateSurfaceColor();
+        
+        // 设置光照属性
+        surfaceActor->GetProperty()->SetAmbient(0.3);
+        surfaceActor->GetProperty()->SetDiffuse(0.7);
+        surfaceActor->GetProperty()->SetSpecular(0.2);
+        surfaceActor->GetProperty()->SetSpecularPower(10);
+        
+        // 设置不透明度
+        surfaceActor->GetProperty()->SetOpacity(0.8);
     }
-
-    colorFunction->RemoveAllPoints();
-    
-    // 背景透明
-    colorFunction->AddRGBPoint(0, 0, 0, 0);
-    
-    // 使用标签颜色，但根据灰度值调整亮度
-    double r = color.redF();
-    double g = color.greenF();
-    double b = color.blueF();
-    
-    // 创建从暗到亮的颜色渐变
-    colorFunction->AddRGBPoint(1, r*0.2, g*0.2, b*0.2);     // 暗
-    colorFunction->AddRGBPoint(128, r*0.6, g*0.6, b*0.6);   // 中等
-    colorFunction->AddRGBPoint(255, r, g, b);               // 亮
 }
 
-void BrainRegionVolume::updateVolumeOpacity()
+void BrainRegionVolume::updateSurfaceColor()
 {
-    auto opacityFunction = volumeProperty->GetScalarOpacity();
-    if (opacityFunction) {
-        opacityFunction->RemoveAllPoints();
-        opacityFunction->AddPoint(0, 0.0);
-        opacityFunction->AddPoint(255, visible ? 0.8 : 0.0);
+    if (surfaceActor) {
+        surfaceActor->GetProperty()->SetColor(color.redF(), color.greenF(), color.blueF());
+    }
+}
+
+void BrainRegionVolume::updateSurfaceOpacity()
+{
+    if (surfaceActor) {
+        surfaceActor->GetProperty()->SetOpacity(visible ? 0.8 : 0.0);
     }
 } 

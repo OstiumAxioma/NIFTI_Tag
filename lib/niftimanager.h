@@ -41,6 +41,10 @@ public:
     BrainRegionVolume* getRegionVolume(int label);
     bool hasMriData() const { return mriImage != nullptr; }
     bool hasLabelData() const { return labelImage != nullptr; }
+    
+    // 获取原始图像数据
+    vtkImageData* getMriImage() const { return mriImage; }
+    vtkImageData* getLabelImage() const { return labelImage; }
 
     // 渲染器设置
     void setRenderer(vtkRenderer* renderer);

@@ -89,6 +89,7 @@ private:
     QAction *importMriAct;
     QAction *importLabelAct;
     QAction *processRegionsAct;
+    QAction *testVolumeAct;
     
     // 区块控制面板
     QDockWidget *regionDockWidget;

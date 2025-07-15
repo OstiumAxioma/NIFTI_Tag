@@ -135,10 +135,10 @@ void NiftiManager::processRegions()
             
             qDebug() << "区块" << label << "创建成功，颜色:" << regionVolume->getColor().name();
             
-            // 延迟添加到渲染器，避免在所有区块创建完成前渲染
-            // if (renderer) {
-            //     addVolumeToRenderer(regionVolume);
-            // }
+            // 添加到渲染器
+            if (renderer) {
+                addVolumeToRenderer(regionVolume);
+            }
         }
         catch (const std::exception& e) {
             qDebug() << "创建区块" << label << "时发生错误:" << e.what();
@@ -190,8 +190,8 @@ void NiftiManager::sortVolumesByCamera(vtkCamera* camera)
     // 重新添加到渲染器（远的先添加）
     if (renderer) {
         for (auto* volume : visibleVolumes) {
-            renderer->RemoveVolume(volume->getVolume());
-            renderer->AddVolume(volume->getVolume());
+            renderer->RemoveActor(volume->getSurfaceActor());
+            renderer->AddActor(volume->getSurfaceActor());
         }
     }
 }
@@ -251,7 +251,7 @@ QColor NiftiManager::generateColorForLabel(int label)
 void NiftiManager::addVolumeToRenderer(BrainRegionVolume* volume)
 {
     if (renderer && volume) {
-        renderer->AddVolume(volume->getVolume());
+        renderer->AddActor(volume->getSurfaceActor());
         renderer->AddActor(volume->getCentroidSphere());
     }
 }
@@ -259,7 +259,7 @@ void NiftiManager::addVolumeToRenderer(BrainRegionVolume* volume)
 void NiftiManager::removeVolumeFromRenderer(BrainRegionVolume* volume)
 {
     if (renderer && volume) {
-        renderer->RemoveVolume(volume->getVolume());
+        renderer->RemoveActor(volume->getSurfaceActor());
         renderer->RemoveActor(volume->getCentroidSphere());
     }
 } 

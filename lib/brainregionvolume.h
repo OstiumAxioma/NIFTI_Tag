@@ -7,11 +7,10 @@
 
 // VTK头文件
 #include <vtkSmartPointer.h>
-#include <vtkVolume.h>
 #include <vtkActor.h>
 #include <vtkImageData.h>
-#include <vtkVolumeProperty.h>
-#include <vtkVolumeMapper.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkProperty.h>
 #include <vtkCamera.h>
 
 class BrainRegionVolume : public QObject
@@ -29,7 +28,7 @@ public:
     QVector3D getCentroid() const { return centroid; }
 
     // VTK对象获取
-    vtkVolume* getVolume() const { return volume; }
+    vtkActor* getSurfaceActor() const { return surfaceActor; }
     vtkActor* getCentroidSphere() const { return centroidSphere; }
 
     // 数据设置
@@ -59,17 +58,16 @@ private:
     QVector3D centroid;
 
     // VTK对象
-    vtkSmartPointer<vtkVolume> volume;
-    vtkSmartPointer<vtkVolumeProperty> volumeProperty;
-    vtkSmartPointer<vtkVolumeMapper> volumeMapper;
+    vtkSmartPointer<vtkActor> surfaceActor;
+    vtkSmartPointer<vtkPolyDataMapper> surfaceMapper;
     vtkSmartPointer<vtkActor> centroidSphere;
 
     // 私有方法
-    void initializeVolume();
+    void initializeSurfaceActor();
     void initializeCentroidSphere();
-    void setupVolumeProperty();
-    void updateVolumeColorTransfer();
-    void updateVolumeOpacity();
+    void setupSurfaceProperty();
+    void updateSurfaceColor();
+    void updateSurfaceOpacity();
 };
 
 #endif // BRAINREGIONVOLUME_H 

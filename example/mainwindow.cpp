@@ -109,6 +109,15 @@ void MainWindow::createActions()
     processRegionsAct = new QAction("处理区块(&P)", this);
     processRegionsAct->setStatusTip("通过API处理脑区块并生成可视化");
     connect(processRegionsAct, &QAction::triggered, this, &MainWindow::processNiftiRegions);
+    
+    // 添加测试体绘制动作
+    testVolumeAct = new QAction("测试体绘制(&T)", this);
+    testVolumeAct->setStatusTip("测试基础NIFTI体绘制功能");
+    connect(testVolumeAct, &QAction::triggered, [this]() {
+        statusBar()->showMessage("正在测试体绘制...");
+        niftiAPI->testSimpleVolumeRendering();
+        statusBar()->showMessage("体绘制测试完成", 3000);
+    });
 }
 
 void MainWindow::createMenus()
@@ -118,6 +127,7 @@ void MainWindow::createMenus()
     fileMenu->addAction(importLabelAct);
     fileMenu->addSeparator();
     fileMenu->addAction(processRegionsAct);
+    fileMenu->addAction(testVolumeAct);
     fileMenu->addSeparator();
     fileMenu->addAction(exitAct);
 
@@ -132,6 +142,7 @@ void MainWindow::createToolBars()
     fileToolBar->addAction(importLabelAct);
     fileToolBar->addSeparator();
     fileToolBar->addAction(processRegionsAct);
+    fileToolBar->addAction(testVolumeAct);
     fileToolBar->addSeparator();
     fileToolBar->addAction(exitAct);
 }

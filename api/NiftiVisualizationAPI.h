@@ -9,6 +9,7 @@
 
 // VTK前向声明
 class vtkRenderer;
+class vtkImageData;
 
 /**
  * @brief NIFTI脑影像可视化静态库API
@@ -219,6 +220,12 @@ public:
      * @return 导出成功返回true
      */
     bool exportRegionInfo(const QString& filePath) const;
+    
+    /**
+     * @brief 测试简单的体绘制功能
+     * @note 用于验证基础NIFTI体绘制是否正常工作
+     */
+    void testSimpleVolumeRendering();
 
 signals:
     /**
@@ -243,6 +250,9 @@ private:
     class NiftiVisualizationAPIPrivate;
     NiftiVisualizationAPIPrivate* d_ptr;
     Q_DECLARE_PRIVATE(NiftiVisualizationAPI)
+    
+    // 私有辅助方法
+    void renderSingleVolume(vtkImageData* imageData, const QColor& color, const QString& name);
 };
 
 #endif // NIFTIVISUALIZATIONAPI_H 
