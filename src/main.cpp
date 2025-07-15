@@ -2,7 +2,8 @@
 #include <QStyleFactory>
 #include <QMessageBox>
 #include <QDebug>
-#include "mainwindow.h"
+#include <vtkObject.h>
+#include "../example/mainwindow.h"
 
 int main(int argc, char *argv[])
 {

@@ -59,12 +59,11 @@
    <attribute name="toolBarArea">
     <enum>TopToolBarArea</enum>
    </attribute>
-   <addaction name="action_S"/>
    <addaction name="action_Q"/>
   </widget>
   <action name="action_Q">
    <property name="text">
-    <string>退出(&amp;Q)</string>
+    <string>退出(&Q)</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+Q</string>
@@ -72,12 +71,7 @@
   </action>
   <action name="action_A">
    <property name="text">
-    <string>关于(&amp;A)</string>
-   </property>
-  </action>
-  <action name="action_S">
-   <property name="text">
-    <string>创建球体(&amp;S)</string>
+    <string>关于(&A)</string>
    </property>
   </action>
  </widget>

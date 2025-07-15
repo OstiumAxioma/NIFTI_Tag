@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+---
+Always use .\build.bat to compile, and check compilation error before procceeding.
+
+Always update CMakeLists.txt if new files is created.
+
+任何针对功能的实现和修复都不要在example\文件夹中进行，这个文件夹只负责测试程序和接口
