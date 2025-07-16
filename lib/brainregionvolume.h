@@ -33,6 +33,7 @@ public:
 
     // 数据设置
     void setVolumeData(vtkImageData* mriData, vtkImageData* maskData);
+    void setVolumeData(vtkImageData* mriData, vtkImageData* maskData, double minGrayValue, double maxGrayValue);
     void calculateCentroid();
 
     // 显示控制
@@ -45,6 +46,9 @@ public:
     // 体绘制参数
     void setOpacity(double opacity);
     void setSampleDistance(double distance);
+    
+    // 灰度值限制参数
+    void setGrayValueLimits(double minGrayValue, double maxGrayValue);
 
 signals:
     void visibilityChanged(int label, bool visible);
@@ -61,6 +65,11 @@ private:
     vtkSmartPointer<vtkActor> surfaceActor;
     vtkSmartPointer<vtkPolyDataMapper> surfaceMapper;
     vtkSmartPointer<vtkActor> centroidSphere;
+    
+    // 灰度值限制参数
+    double minGrayValue;
+    double maxGrayValue;
+    bool useGrayValueLimits;
 
     // 私有方法
     void initializeSurfaceActor();

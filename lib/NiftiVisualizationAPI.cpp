@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QTextStream>
+#include <algorithm>
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <vtkCamera.h>
@@ -26,6 +27,9 @@ public:
         : q_ptr(q)
         , niftiManager(nullptr)
         , renderer(nullptr)
+        , currentMinGrayValue(0.0)
+        , currentMaxGrayValue(0.0)
+        , useGrayValueLimits(false)
     {
         // 创建内部NIFTI管理器
         niftiManager = new NiftiManager(q);
@@ -55,6 +59,11 @@ public:
     std::function<void(const QString&)> errorCallback;
     std::function<void()> regionsProcessedCallback;
     std::function<void(int, bool)> regionVisibilityCallback;
+    
+    // 灰度值限制
+    double currentMinGrayValue;
+    double currentMaxGrayValue;
+    bool useGrayValueLimits;
     
     Q_DECLARE_PUBLIC(NiftiVisualizationAPI)
 };
@@ -152,6 +161,38 @@ void NiftiVisualizationAPI::processRegions()
     qDebug() << "区块处理完成，surface渲染已添加";
 }
 
+void NiftiVisualizationAPI::processRegions(double minGrayValue, double maxGrayValue)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    // 更新当前的灰度值限制
+    d->currentMinGrayValue = minGrayValue;
+    d->currentMaxGrayValue = maxGrayValue;
+    d->useGrayValueLimits = (minGrayValue < maxGrayValue);
+    
+    d->niftiManager->processRegions(minGrayValue, maxGrayValue);
+    
+    // 处理完成后，确保所有surface actor都已添加到渲染器
+    if (d->renderer) {
+        QList<int> labels = d->niftiManager->getAllLabels();
+        for (int label : labels) {
+            auto* volume = d->niftiManager->getRegionVolume(label);
+            if (volume) {
+                d->renderer->AddActor(volume->getSurfaceActor());
+                d->renderer->AddActor(volume->getCentroidSphere());
+            }
+        }
+        
+        // 重置相机并渲染
+        d->renderer->ResetCamera();
+        if (d->renderer->GetRenderWindow()) {
+            d->renderer->GetRenderWindow()->Render();
+        }
+    }
+    
+    qDebug() << "区块处理完成（带灰度值限制），surface渲染已添加";
+}
+
 void NiftiVisualizationAPI::testSimpleVolumeRendering()
 {
     Q_D(NiftiVisualizationAPI);
@@ -195,6 +236,45 @@ void NiftiVisualizationAPI::testSimpleVolumeRendering()
     }
 }
 
+void NiftiVisualizationAPI::previewMriVisualization()
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    if (!d->renderer) {
+        qDebug() << "渲染器未设置，无法进行MRI预览";
+        return;
+    }
+    
+    if (!d->niftiManager->hasMriData()) {
+        qDebug() << "没有MRI数据，无法进行预览";
+        return;
+    }
+    
+    qDebug() << "开始MRI预览，使用灰度值限制: [" << d->currentMinGrayValue << ", " << d->currentMaxGrayValue << "]";
+    
+    try {
+        // 清理之前的渲染对象
+        d->renderer->RemoveAllViewProps();
+        
+        // 渲染MRI数据
+        renderSingleVolume(d->niftiManager->getMriImage(), QColor(255, 255, 255), "MRI_Preview");
+        
+        // 重置相机并渲染
+        d->renderer->ResetCamera();
+        if (d->renderer->GetRenderWindow()) {
+            d->renderer->GetRenderWindow()->Render();
+        }
+        
+        qDebug() << "MRI预览完成";
+    }
+    catch (const std::exception& e) {
+        qDebug() << "MRI预览失败:" << e.what();
+    }
+    catch (...) {
+        qDebug() << "MRI预览失败: 未知错误";
+    }
+}
+
 void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QColor& color, const QString& name)
 {
     NiftiVisualizationAPIPrivate* d = d_func();
@@ -211,14 +291,43 @@ void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QC
         double* range = imageData->GetScalarRange();
         qDebug() << name << "数据范围: [" << range[0] << ", " << range[1] << "]";
         
+        // 应用灰度值限制
+        double effectiveMinValue = range[0];
+        double effectiveMaxValue = range[1];
+        
+        if (d->useGrayValueLimits) {
+            effectiveMinValue = std::max(range[0], d->currentMinGrayValue);
+            effectiveMaxValue = std::min(range[1], d->currentMaxGrayValue);
+            qDebug() << name << "应用灰度值限制: [" << effectiveMinValue << ", " << effectiveMaxValue << "]";
+        }
+        
         // 使用Marching Cubes算法生成等值面
         auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
         marchingCubes->SetInputData(imageData);
         
-        // 根据数据范围设置合适的阈值
-        double threshold = range[0] + (range[1] - range[0]) * 0.3;  // 使用30%的阈值
+        // 改进的阈值算法，类似于BrainRegionVolume中的实现
+        double threshold;
+        double dataRange = effectiveMaxValue - effectiveMinValue;
+        
+        if (dataRange > 0) {
+            // 根据数据范围选择合适的阈值百分比
+            if (dataRange > 1000) {
+                // 高动态范围数据，使用中等阈值
+                threshold = effectiveMinValue + dataRange * 0.35;
+            } else if (dataRange > 100) {
+                // 中等动态范围数据，使用低阈值
+                threshold = effectiveMinValue + dataRange * 0.15;
+            } else {
+                // 低动态范围数据，使用非常低的阈值
+                threshold = effectiveMinValue + dataRange * 0.05;
+            }
+        } else {
+            // 回退到简单阈值
+            threshold = effectiveMinValue + 0.1;
+        }
+        
         marchingCubes->SetValue(0, threshold);
-        qDebug() << name << "使用阈值: " << threshold;
+        qDebug() << name << "使用阈值: " << threshold << "(数据范围: " << dataRange << ")";
         
         marchingCubes->Update();
         
@@ -297,6 +406,23 @@ void NiftiVisualizationAPI::setRegionOpacity(int label, double opacity)
     BrainRegionVolume* volume = d->niftiManager->getRegionVolume(label);
     if (volume) {
         volume->setOpacity(opacity);
+    }
+}
+
+void NiftiVisualizationAPI::setGrayValueLimits(double minGrayValue, double maxGrayValue)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    // 更新内部状态
+    d->currentMinGrayValue = minGrayValue;
+    d->currentMaxGrayValue = maxGrayValue;
+    d->useGrayValueLimits = (minGrayValue < maxGrayValue);
+    
+    qDebug() << "API设置灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
+    
+    // 同时更新NiftiManager（如果已经有区块的话）
+    if (d->niftiManager) {
+        d->niftiManager->setGrayValueLimits(minGrayValue, maxGrayValue);
     }
 }
 

@@ -100,6 +100,11 @@ bool NiftiManager::loadLabelNifti(const QString& filePath)
 
 void NiftiManager::processRegions()
 {
+    processRegions(0.0, 0.0);
+}
+
+void NiftiManager::processRegions(double minGrayValue, double maxGrayValue)
+{
     if (!mriImage || !labelImage) {
         emit errorOccurred("需要同时加载MRI和标签数据才能处理区块");
         return;
@@ -131,7 +136,12 @@ void NiftiManager::processRegions()
                      << "RGB(" << uniqueColor.redF() << "," << uniqueColor.greenF() << "," << uniqueColor.blueF() << ")";
             
             // 设置体数据（MRI数据和标签掩码）
-            regionVolume->setVolumeData(mriImage, labelImage);
+            if (minGrayValue < maxGrayValue) {
+                regionVolume->setVolumeData(mriImage, labelImage, minGrayValue, maxGrayValue);
+                qDebug() << "区块" << label << "使用灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
+            } else {
+                regionVolume->setVolumeData(mriImage, labelImage);
+            }
             
             // 连接信号
             connect(regionVolume, &BrainRegionVolume::visibilityChanged,
@@ -292,5 +302,16 @@ void NiftiManager::removeVolumeFromRenderer(BrainRegionVolume* volume)
     if (renderer && volume) {
         renderer->RemoveActor(volume->getSurfaceActor());
         renderer->RemoveActor(volume->getCentroidSphere());
+    }
+}
+
+void NiftiManager::setGrayValueLimits(double minGrayValue, double maxGrayValue)
+{
+    qDebug() << "为所有区块设置灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
+    
+    for (auto* volume : regionVolumes.values()) {
+        if (volume) {
+            volume->setGrayValueLimits(minGrayValue, maxGrayValue);
+        }
     }
 } 

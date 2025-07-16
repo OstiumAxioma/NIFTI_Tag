@@ -2,6 +2,7 @@
 
 #include <QDebug>
 #include <cmath>
+#include <algorithm>
 
 // VTK头文件
 #include <vtkImageData.h>
@@ -26,6 +27,9 @@ BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
     , color(Qt::red)  // 默认颜色，将在NiftiManager中被覆盖
     , visible(true)
     , centroid(0, 0, 0)
+    , minGrayValue(0.0)
+    , maxGrayValue(0.0)
+    , useGrayValueLimits(false)
 {
     initializeSurfaceActor();
     initializeCentroidSphere();
@@ -39,10 +43,20 @@ BrainRegionVolume::~BrainRegionVolume()
 
 void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskData)
 {
+    setVolumeData(mriData, maskData, 0.0, 0.0);
+}
+
+void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskData, double minGrayValue, double maxGrayValue)
+{
     if (!mriData || !maskData) {
         qDebug() << "警告: MRI数据或掩码数据为空";
         return;
     }
+    
+    // 设置灰度值限制
+    this->minGrayValue = minGrayValue;
+    this->maxGrayValue = maxGrayValue;
+    this->useGrayValueLimits = (minGrayValue < maxGrayValue);
 
     try {
         qDebug() << "开始处理区块" << label << "的surface数据（融合MRI和标签数据）";
@@ -114,8 +128,18 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
         
         qDebug() << "区块" << label << "掩码MRI数据范围: [" << mriRange[0] << ", " << mriRange[1] << "]";
         
+        // 应用灰度值限制
+        double effectiveMinValue = mriRange[0];
+        double effectiveMaxValue = mriRange[1];
+        
+        if (useGrayValueLimits) {
+            effectiveMinValue = std::max(mriRange[0], minGrayValue);
+            effectiveMaxValue = std::min(mriRange[1], maxGrayValue);
+            qDebug() << "区块" << label << "应用灰度值限制: [" << effectiveMinValue << ", " << effectiveMaxValue << "]";
+        }
+        
         // 检查掩码MRI数据是否有效
-        if (mriRange[1] <= mriRange[0] || mriRange[1] == 0) {
+        if (effectiveMaxValue <= effectiveMinValue || effectiveMaxValue == 0) {
             qDebug() << "区块" << label << "掩码MRI数据无效，回退到使用标签数据生成surface";
             
             // 回退策略：直接使用阈值化的标签数据
@@ -148,28 +172,49 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
             marchingCubes->SetInputData(maskedMriData);
             
-            // 根据MRI数据范围设置合适的阈值
-            double threshold_value;
-            if (mriRange[1] > mriRange[0]) {
-                // 尝试不同的阈值百分比，从低到高
-                double thresholdPercent = 0.1; // 从10%开始
-                threshold_value = mriRange[0] + (mriRange[1] - mriRange[0]) * thresholdPercent;
+            // 改进的多阈值算法，更好地显示脑沟回
+            QList<double> thresholds;
+            double dataRange = effectiveMaxValue - effectiveMinValue;
+            
+            if (dataRange > 0) {
+                // 使用多个阈值来更好地捕获脑组织的细节
+                // 低阈值：捕获脑实质边界
+                double lowThreshold = effectiveMinValue + dataRange * 0.15;
+                // 中阈值：捕获灰质/白质边界
+                double midThreshold = effectiveMinValue + dataRange * 0.35;
+                // 高阈值：捕获高密度区域
+                double highThreshold = effectiveMinValue + dataRange * 0.65;
                 
-                // 确保阈值在有效范围内
-                if (threshold_value <= mriRange[0]) {
-                    threshold_value = mriRange[0] + (mriRange[1] - mriRange[0]) * 0.01; // 使用1%
+                // 根据数据范围选择最合适的阈值
+                if (dataRange > 1000) {
+                    // 高动态范围数据，使用中等阈值
+                    thresholds << midThreshold;
+                } else if (dataRange > 100) {
+                    // 中等动态范围数据，使用低阈值
+                    thresholds << lowThreshold;
+                } else {
+                    // 低动态范围数据，使用非常低的阈值
+                    thresholds << (effectiveMinValue + dataRange * 0.05);
                 }
+                
+                qDebug() << "区块" << label << "数据范围:" << dataRange 
+                         << "低阈值:" << lowThreshold 
+                         << "中阈值:" << midThreshold 
+                         << "高阈值:" << highThreshold;
             } else {
-                // 如果数据范围无效，使用固定阈值
-                threshold_value = mriRange[0] + 0.1;
+                // 回退到简单阈值
+                thresholds << (effectiveMinValue + 0.1);
             }
             
-            marchingCubes->SetValue(0, threshold_value);
+            // 设置阈值（使用第一个阈值）
+            if (!thresholds.isEmpty()) {
+                marchingCubes->SetValue(0, thresholds[0]);
+                qDebug() << "区块" << label << "使用MRI阈值: " << thresholds[0];
+            }
+            
             marchingCubes->ComputeNormalsOn();  // 启用法线计算
             marchingCubes->ComputeGradientsOn(); // 启用梯度计算
             marchingCubes->Update();
-            
-            qDebug() << "区块" << label << "使用MRI阈值: " << threshold_value;
 
             // 检查Marching Cubes是否生成了有效的多边形数据
             vtkPolyData* polyData = marchingCubes->GetOutput();
@@ -321,6 +366,15 @@ void BrainRegionVolume::setSampleDistance(double distance)
     // Surface渲染不需要采样距离设置
     Q_UNUSED(distance)
     qDebug() << "Surface渲染不支持setSampleDistance";
+}
+
+void BrainRegionVolume::setGrayValueLimits(double minGrayValue, double maxGrayValue)
+{
+    this->minGrayValue = minGrayValue;
+    this->maxGrayValue = maxGrayValue;
+    this->useGrayValueLimits = (minGrayValue < maxGrayValue);
+    
+    qDebug() << "区块" << label << "设置灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
 }
 
 void BrainRegionVolume::initializeSurfaceActor()

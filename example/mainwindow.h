@@ -26,6 +26,9 @@ class QPushButton;
 class QVBoxLayout;
 class QHBoxLayout;
 class QLabel;
+class QSlider;
+class QSpinBox;
+class QGroupBox;
 QT_END_NAMESPACE
 
 // 前向声明 - 只能使用API接口
@@ -71,6 +74,10 @@ private slots:
     void showAllRegions();
     void hideAllRegions();
     
+    // 灰度值控制槽函数
+    void onGrayValueChanged();
+    void onPreviewButtonClicked();
+    
     // API回调响应
     void onNiftiError(const QString& message);
     void onRegionsProcessed();
@@ -98,6 +105,14 @@ private:
     QPushButton *hideAllButton;
     QPushButton *sortVolumesButton;
     QLabel *statusLabel;
+    
+    // 灰度值控制
+    QGroupBox *grayValueGroupBox;
+    QSlider *minGraySlider;
+    QSlider *maxGraySlider;
+    QSpinBox *minGraySpinBox;
+    QSpinBox *maxGraySpinBox;
+    QPushButton *previewButton;
 
     // VTK组件
     vtkSmartPointer<vtkRenderer> renderer;

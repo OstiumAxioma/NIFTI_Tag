@@ -88,6 +88,14 @@ public:
     void processRegions();
     
     /**
+     * @brief 处理脑区块并生成可视化（带灰度值限制）
+     * @param minGrayValue 最小灰度值限制
+     * @param maxGrayValue 最大灰度值限制
+     * @note 需要先加载MRI和标签数据
+     */
+    void processRegions(double minGrayValue, double maxGrayValue);
+    
+    /**
      * @brief 清理所有区块数据
      */
     void clearRegions();
@@ -126,6 +134,14 @@ public:
      * @param opacity 不透明度（0.0-1.0）
      */
     void setRegionOpacity(int label, double opacity);
+    
+    /**
+     * @brief 设置所有区块的灰度值限制
+     * @param minGrayValue 最小灰度值限制
+     * @param maxGrayValue 最大灰度值限制
+     * @note 用于适应不同MRI代表脑实质的灰度值不同的情况
+     */
+    void setGrayValueLimits(double minGrayValue, double maxGrayValue);
 
     // ========== 信息获取 ==========
     
@@ -226,6 +242,12 @@ public:
      * @note 用于验证基础NIFTI体绘制是否正常工作
      */
     void testSimpleVolumeRendering();
+    
+    /**
+     * @brief 预览MRI数据的可视化效果
+     * @note 使用当前设置的灰度值限制进行预览，用于调整灰度值参数
+     */
+    void previewMriVisualization();
 
 signals:
     /**

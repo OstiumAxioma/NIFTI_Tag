@@ -17,6 +17,9 @@
 #include <QListWidgetItem>
 #include <QPushButton>
 #include <QSplitter>
+#include <QSlider>
+#include <QSpinBox>
+#include <QGroupBox>
 
 // VTK头文件
 #include <vtkSmartPointer.h>
@@ -208,6 +211,53 @@ void MainWindow::setupRegionControlPanel()
     statusLabel->setStyleSheet("QLabel { font-weight: bold; color: blue; }");
     layout->addWidget(statusLabel);
     
+    // 灰度值控制组
+    grayValueGroupBox = new QGroupBox("MRI灰度值限制");
+    QVBoxLayout *grayLayout = new QVBoxLayout(grayValueGroupBox);
+    
+    // 最小灰度值控制
+    QHBoxLayout *minGrayLayout = new QHBoxLayout();
+    minGrayLayout->addWidget(new QLabel("最小值:"));
+    minGraySlider = new QSlider(Qt::Horizontal);
+    minGraySlider->setRange(0, 10000);
+    minGraySlider->setValue(0);
+    minGraySpinBox = new QSpinBox();
+    minGraySpinBox->setRange(0, 10000);
+    minGraySpinBox->setValue(0);
+    minGrayLayout->addWidget(minGraySlider);
+    minGrayLayout->addWidget(minGraySpinBox);
+    grayLayout->addLayout(minGrayLayout);
+    
+    // 最大灰度值控制
+    QHBoxLayout *maxGrayLayout = new QHBoxLayout();
+    maxGrayLayout->addWidget(new QLabel("最大值:"));
+    maxGraySlider = new QSlider(Qt::Horizontal);
+    maxGraySlider->setRange(0, 10000);
+    maxGraySlider->setValue(3000);
+    maxGraySpinBox = new QSpinBox();
+    maxGraySpinBox->setRange(0, 10000);
+    maxGraySpinBox->setValue(3000);
+    maxGrayLayout->addWidget(maxGraySlider);
+    maxGrayLayout->addWidget(maxGraySpinBox);
+    grayLayout->addLayout(maxGrayLayout);
+    
+    // 预览按钮
+    previewButton = new QPushButton("预览MRI");
+    previewButton->setEnabled(false);
+    grayLayout->addWidget(previewButton);
+    
+    // 连接信号
+    connect(minGraySlider, &QSlider::valueChanged, minGraySpinBox, &QSpinBox::setValue);
+    connect(minGraySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), minGraySlider, &QSlider::setValue);
+    connect(maxGraySlider, &QSlider::valueChanged, maxGraySpinBox, &QSpinBox::setValue);
+    connect(maxGraySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), maxGraySlider, &QSlider::setValue);
+    
+    connect(minGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
+    connect(maxGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
+    connect(previewButton, &QPushButton::clicked, this, &MainWindow::onPreviewButtonClicked);
+    
+    layout->addWidget(grayValueGroupBox);
+    
     // 区块列表
     regionListWidget = new QListWidget();
     regionListWidget->setSelectionMode(QAbstractItemView::NoSelection);
@@ -321,6 +371,45 @@ void MainWindow::hideAllRegions()
     niftiAPI->render();
 }
 
+void MainWindow::onGrayValueChanged()
+{
+    // 实时更新API中的灰度值限制
+    double minValue = minGraySpinBox->value();
+    double maxValue = maxGraySpinBox->value();
+    
+    // 确保最小值不大于最大值
+    if (minValue >= maxValue) {
+        if (sender() == minGraySlider || sender() == minGraySpinBox) {
+            // 如果是最小值改变，调整最大值
+            maxValue = minValue + 1;
+            maxGraySlider->setValue(maxValue);
+            maxGraySpinBox->setValue(maxValue);
+        } else {
+            // 如果是最大值改变，调整最小值
+            minValue = maxValue - 1;
+            minGraySlider->setValue(minValue);
+            minGraySpinBox->setValue(minValue);
+        }
+    }
+    
+    // 更新API中的灰度值限制
+    niftiAPI->setGrayValueLimits(minValue, maxValue);
+    
+    statusBar()->showMessage(QString("灰度值限制: [%1, %2]").arg(minValue).arg(maxValue), 2000);
+}
+
+void MainWindow::onPreviewButtonClicked()
+{
+    if (!niftiAPI) return;
+    
+    statusBar()->showMessage("正在预览MRI...");
+    
+    // 调用API的预览方法
+    niftiAPI->previewMriVisualization();
+    
+    statusBar()->showMessage("MRI预览完成", 3000);
+}
+
 void MainWindow::onNiftiError(const QString& message)
 {
     QMessageBox::critical(this, "NIFTI错误", message);
@@ -382,4 +471,8 @@ void MainWindow::updateActionStates()
     showAllButton->setEnabled(hasRegions);
     hideAllButton->setEnabled(hasRegions);
     sortVolumesButton->setEnabled(hasRegions);
+    
+    // 灰度值控制
+    grayValueGroupBox->setEnabled(hasMri);
+    previewButton->setEnabled(hasMri);
 } 

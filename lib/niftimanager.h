@@ -30,11 +30,13 @@ public:
 
     // 数据处理与分区
     void processRegions();
+    void processRegions(double minGrayValue, double maxGrayValue);
     void clearRegions();
 
     // 区块管理
     void updateRegionVisibility(int label, bool visible);
     void sortVolumesByCamera(vtkCamera* camera);
+    void setGrayValueLimits(double minGrayValue, double maxGrayValue);
     
     // 获取信息
     QList<int> getAllLabels() const;
