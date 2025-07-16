@@ -122,7 +122,13 @@ void NiftiManager::processRegions()
         
         try {
             auto* regionVolume = new BrainRegionVolume(label, this);
-            regionVolume->updateColor(generateColorForLabel(label));
+            
+            // 为每个区块生成独特的颜色
+            QColor uniqueColor = generateColorForLabel(label);
+            regionVolume->updateColor(uniqueColor);
+            
+            qDebug() << "区块" << label << "分配颜色:" << uniqueColor.name() 
+                     << "RGB(" << uniqueColor.redF() << "," << uniqueColor.greenF() << "," << uniqueColor.blueF() << ")";
             
             // 设置体数据（MRI数据和标签掩码）
             regionVolume->setVolumeData(mriImage, labelImage);
@@ -133,7 +139,7 @@ void NiftiManager::processRegions()
             
             regionVolumes[label] = regionVolume;
             
-            qDebug() << "区块" << label << "创建成功，颜色:" << regionVolume->getColor().name();
+            qDebug() << "区块" << label << "创建成功，最终颜色:" << regionVolume->getColor().name();
             
             // 添加到渲染器
             if (renderer) {
@@ -238,14 +244,39 @@ QList<int> NiftiManager::extractLabelsFromImage()
 QColor NiftiManager::generateColorForLabel(int label)
 {
     // 使用标签值作为种子生成固定但不同的颜色
-    QRandomGenerator generator(static_cast<quint32>(label));
+    QRandomGenerator generator(static_cast<quint32>(label * 12345)); // 使用乘数增加随机性
     
-    // 生成较饱和的颜色
+    // 预定义一些鲜艳的颜色作为基础
+    QList<QColor> baseColors = {
+        QColor(255, 0, 0),     // 红色
+        QColor(0, 255, 0),     // 绿色
+        QColor(0, 0, 255),     // 蓝色
+        QColor(255, 255, 0),   // 黄色
+        QColor(255, 0, 255),   // 洋红
+        QColor(0, 255, 255),   // 青色
+        QColor(255, 128, 0),   // 橙色
+        QColor(128, 0, 255),   // 紫色
+        QColor(255, 0, 128),   // 粉红
+        QColor(128, 255, 0),   // 青绿
+        QColor(0, 128, 255),   // 天蓝
+        QColor(255, 128, 128), // 浅红
+    };
+    
+    // 如果标签数量少，直接使用预定义颜色
+    if (label > 0 && label <= baseColors.size()) {
+        return baseColors[label - 1];
+    }
+    
+    // 否则生成随机但饱和的颜色
     int hue = generator.bounded(360);
-    int saturation = generator.bounded(128, 255);
-    int value = generator.bounded(128, 255);
+    int saturation = generator.bounded(180, 255);  // 更高的饱和度
+    int value = generator.bounded(150, 255);       // 更高的亮度
     
-    return QColor::fromHsv(hue, saturation, value);
+    QColor generatedColor = QColor::fromHsv(hue, saturation, value);
+    
+    qDebug() << "为标签" << label << "生成颜色: HSV(" << hue << "," << saturation << "," << value << ") = " << generatedColor.name();
+    
+    return generatedColor;
 }
 
 void NiftiManager::addVolumeToRenderer(BrainRegionVolume* volume)
