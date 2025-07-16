@@ -14,6 +14,9 @@
 #include <vtkPolyDataMapper.h>
 #include <vtkActor.h>
 #include <vtkProperty.h>
+#include <vtkSmartPointer.h>
+#include <vtkPolyData.h>
+#include <vtkActorCollection.h>
 
 /**
  * @brief NiftiVisualizationAPI的私有实现类
@@ -45,6 +48,12 @@ public:
     
     ~NiftiVisualizationAPIPrivate()
     {
+        // 清理MRI预览actor
+        if (mriPreviewActor && renderer) {
+            renderer->RemoveActor(mriPreviewActor);
+            mriPreviewActor = nullptr;
+        }
+        
         if (niftiManager) {
             delete niftiManager;
         }
@@ -64,6 +73,9 @@ public:
     double currentMinGrayValue;
     double currentMaxGrayValue;
     bool useGrayValueLimits;
+    
+    // MRI预览actor
+    vtkSmartPointer<vtkActor> mriPreviewActor;
     
     Q_DECLARE_PUBLIC(NiftiVisualizationAPI)
 };
@@ -253,11 +265,22 @@ void NiftiVisualizationAPI::previewMriVisualization()
     qDebug() << "开始MRI预览，使用灰度值限制: [" << d->currentMinGrayValue << ", " << d->currentMaxGrayValue << "]";
     
     try {
-        // 清理之前的渲染对象
-        d->renderer->RemoveAllViewProps();
+        // 清理之前的MRI预览actor
+        if (d->mriPreviewActor) {
+            d->renderer->RemoveActor(d->mriPreviewActor);
+            d->mriPreviewActor = nullptr;
+        }
         
-        // 渲染MRI数据
-        renderSingleVolume(d->niftiManager->getMriImage(), QColor(255, 255, 255), "MRI_Preview");
+        // 创建新的MRI预览actor（使用智能指针确保生命周期管理）
+        d->mriPreviewActor = vtkSmartPointer<vtkActor>::New();
+        
+        if (createMriPreviewActor(d->niftiManager->getMriImage(), d->mriPreviewActor)) {
+            // 添加到渲染器
+            d->renderer->AddActor(d->mriPreviewActor);
+        } else {
+            qDebug() << "MRI预览actor创建失败";
+            d->mriPreviewActor = nullptr;
+        }
         
         // 重置相机并渲染
         d->renderer->ResetCamera();
@@ -357,6 +380,193 @@ void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QC
     }
     catch (...) {
         qDebug() << name << "渲染失败: 未知错误";
+    }
+}
+
+bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSmartPointer<vtkActor> actor)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    if (!imageData || !actor) {
+        qDebug() << "MRI数据或actor为空，无法创建预览actor";
+        return false;
+    }
+    
+    try {
+        // 获取数据范围以设置合适的阈值
+        double* range = imageData->GetScalarRange();
+        qDebug() << "MRI预览数据范围: [" << range[0] << ", " << range[1] << "]";
+        
+        // 应用灰度值限制
+        double effectiveMinValue = range[0];
+        double effectiveMaxValue = range[1];
+        
+        if (d->useGrayValueLimits) {
+            effectiveMinValue = std::max(range[0], d->currentMinGrayValue);
+            effectiveMaxValue = std::min(range[1], d->currentMaxGrayValue);
+            qDebug() << "MRI预览应用灰度值限制: [" << effectiveMinValue << ", " << effectiveMaxValue << "]";
+        }
+        
+        // 使用Marching Cubes算法生成等值面
+        auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
+        marchingCubes->SetInputData(imageData);
+        
+        // 改进的阈值算法
+        double threshold;
+        double dataRange = effectiveMaxValue - effectiveMinValue;
+        
+        if (dataRange > 0) {
+            // 根据数据范围选择合适的阈值百分比
+            if (dataRange > 1000) {
+                threshold = effectiveMinValue + dataRange * 0.35;
+            } else if (dataRange > 100) {
+                threshold = effectiveMinValue + dataRange * 0.15;
+            } else {
+                threshold = effectiveMinValue + dataRange * 0.05;
+            }
+        } else {
+            threshold = effectiveMinValue + 0.1;
+        }
+        
+        marchingCubes->SetValue(0, threshold);
+        qDebug() << "MRI预览使用阈值: " << threshold << "(数据范围: " << dataRange << ")";
+        
+        try {
+            marchingCubes->Update();
+            
+            // 检查Marching Cubes输出
+            vtkPolyData* polyData = marchingCubes->GetOutput();
+            if (!polyData) {
+                qDebug() << "MRI预览Marching Cubes输出为空";
+                return false;
+            }
+            
+            int numPoints = polyData->GetNumberOfPoints();
+            int numCells = polyData->GetNumberOfCells();
+            qDebug() << "MRI预览Marching Cubes生成了" << numPoints << "个点和" << numCells << "个面";
+            
+            if (numPoints == 0 || numCells == 0) {
+                qDebug() << "MRI预览Marching Cubes没有生成有效几何体，尝试调整阈值";
+                
+                // 尝试更低的阈值
+                double lowerThreshold = effectiveMinValue + dataRange * 0.01;
+                marchingCubes->SetValue(0, lowerThreshold);
+                qDebug() << "MRI预览尝试更低阈值: " << lowerThreshold;
+                
+                marchingCubes->Update();
+                polyData = marchingCubes->GetOutput();
+                
+                if (!polyData || polyData->GetNumberOfPoints() == 0) {
+                    qDebug() << "MRI预览即使使用更低阈值也无法生成有效几何体";
+                    return false;
+                }
+                
+                qDebug() << "MRI预览使用更低阈值生成了" << polyData->GetNumberOfPoints() << "个点";
+            }
+            
+            // 检查几何体是否过于复杂，如果是则调整阈值
+            if (numPoints > 100000 || numCells > 200000) {
+                qDebug() << "MRI预览几何体过于复杂，尝试提高阈值";
+                
+                // 提高阈值以减少几何体复杂度
+                double higherThreshold = effectiveMinValue + dataRange * 0.8; // 使用80%的阈值
+                marchingCubes->SetValue(0, higherThreshold);
+                qDebug() << "MRI预览尝试更高阈值: " << higherThreshold;
+                
+                marchingCubes->Update();
+                polyData = marchingCubes->GetOutput();
+                
+                if (polyData && polyData->GetNumberOfPoints() > 0) {
+                    int newNumPoints = polyData->GetNumberOfPoints();
+                    int newNumCells = polyData->GetNumberOfCells();
+                    qDebug() << "MRI预览使用更高阈值生成了" << newNumPoints << "个点和" << newNumCells << "个面";
+                    
+                    // 如果仍然太复杂，再次提高阈值
+                    if (newNumPoints > 50000 || newNumCells > 100000) {
+                        double veryHighThreshold = effectiveMinValue + dataRange * 0.9; // 使用90%的阈值
+                        marchingCubes->SetValue(0, veryHighThreshold);
+                        qDebug() << "MRI预览尝试非常高的阈值: " << veryHighThreshold;
+                        
+                        marchingCubes->Update();
+                        polyData = marchingCubes->GetOutput();
+                        
+                        if (polyData && polyData->GetNumberOfPoints() > 0) {
+                            qDebug() << "MRI预览最终生成了" << polyData->GetNumberOfPoints() << "个点和" << polyData->GetNumberOfCells() << "个面";
+                        }
+                    }
+                } else {
+                    qDebug() << "MRI预览更高阈值无法生成有效几何体，回退到原始阈值";
+                    marchingCubes->SetValue(0, threshold);
+                    marchingCubes->Update();
+                }
+            }
+            
+        } catch (const std::exception& e) {
+            qDebug() << "MRI预览Marching Cubes处理异常:" << e.what();
+            return false;
+        }
+        
+        // 创建mapper
+        auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+        if (!mapper) {
+            qDebug() << "MRI预览mapper创建失败";
+            return false;
+        }
+        
+        try {
+            mapper->SetInputConnection(marchingCubes->GetOutputPort());
+            mapper->Update();
+        } catch (const std::exception& e) {
+            qDebug() << "MRI预览mapper设置失败:" << e.what();
+            return false;
+        }
+        
+        // 设置actor
+        try {
+            actor->SetMapper(mapper);
+            
+            // 设置材质属性（不透明白色）
+            auto property = actor->GetProperty();
+            if (property) {
+                property->SetColor(1.0, 1.0, 1.0);
+                property->SetOpacity(1.0);  // 完全不透明
+                property->SetAmbient(0.3);
+                property->SetDiffuse(0.7);
+                property->SetSpecular(0.2);
+                property->SetSpecularPower(10);
+            }
+            
+            qDebug() << "MRI预览actor创建成功";
+            return true;
+        } catch (const std::exception& e) {
+            qDebug() << "MRI预览actor设置失败:" << e.what();
+            return false;
+        }
+    }
+    catch (const std::exception& e) {
+        qDebug() << "MRI预览actor创建失败:" << e.what();
+        return false;
+    }
+    catch (...) {
+        qDebug() << "MRI预览actor创建失败: 未知错误";
+        return false;
+    }
+}
+
+void NiftiVisualizationAPI::setMriPreviewVisible(bool visible)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    if (d->mriPreviewActor) {
+        d->mriPreviewActor->SetVisibility(visible);
+        
+        if (d->renderer && d->renderer->GetRenderWindow()) {
+            d->renderer->GetRenderWindow()->Render();
+        }
+        
+        qDebug() << "MRI预览可见性设置为:" << visible;
+    } else {
+        qDebug() << "MRI预览actor不存在，无法设置可见性";
     }
 }
 

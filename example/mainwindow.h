@@ -29,6 +29,7 @@ class QLabel;
 class QSlider;
 class QSpinBox;
 class QGroupBox;
+class QCheckBox;
 QT_END_NAMESPACE
 
 // 前向声明 - 只能使用API接口
@@ -77,6 +78,7 @@ private slots:
     // 灰度值控制槽函数
     void onGrayValueChanged();
     void onPreviewButtonClicked();
+    void onMriPreviewToggled(bool checked);
     
     // API回调响应
     void onNiftiError(const QString& message);
@@ -113,6 +115,7 @@ private:
     QSpinBox *minGraySpinBox;
     QSpinBox *maxGraySpinBox;
     QPushButton *previewButton;
+    QCheckBox *mriPreviewCheckBox;
 
     // VTK组件
     vtkSmartPointer<vtkRenderer> renderer;

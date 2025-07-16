@@ -20,6 +20,7 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QGroupBox>
+#include <QCheckBox>
 
 // VTK头文件
 #include <vtkSmartPointer.h>
@@ -241,10 +242,18 @@ void MainWindow::setupRegionControlPanel()
     maxGrayLayout->addWidget(maxGraySpinBox);
     grayLayout->addLayout(maxGrayLayout);
     
-    // 预览按钮
+    // 预览按钮和显示开关
+    QHBoxLayout *previewLayout = new QHBoxLayout();
     previewButton = new QPushButton("预览MRI");
     previewButton->setEnabled(false);
-    grayLayout->addWidget(previewButton);
+    previewLayout->addWidget(previewButton);
+    
+    mriPreviewCheckBox = new QCheckBox("显示MRI预览");
+    mriPreviewCheckBox->setEnabled(false);
+    mriPreviewCheckBox->setChecked(true);
+    previewLayout->addWidget(mriPreviewCheckBox);
+    
+    grayLayout->addLayout(previewLayout);
     
     // 连接信号
     connect(minGraySlider, &QSlider::valueChanged, minGraySpinBox, &QSpinBox::setValue);
@@ -255,6 +264,7 @@ void MainWindow::setupRegionControlPanel()
     connect(minGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
     connect(maxGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
     connect(previewButton, &QPushButton::clicked, this, &MainWindow::onPreviewButtonClicked);
+    connect(mriPreviewCheckBox, &QCheckBox::toggled, this, &MainWindow::onMriPreviewToggled);
     
     layout->addWidget(grayValueGroupBox);
     
@@ -407,7 +417,20 @@ void MainWindow::onPreviewButtonClicked()
     // 调用API的预览方法
     niftiAPI->previewMriVisualization();
     
+    // 预览完成后启用复选框
+    mriPreviewCheckBox->setEnabled(true);
+    
     statusBar()->showMessage("MRI预览完成", 3000);
+}
+
+void MainWindow::onMriPreviewToggled(bool checked)
+{
+    if (!niftiAPI) return;
+    
+    // 设置MRI预览的可见性
+    niftiAPI->setMriPreviewVisible(checked);
+    
+    statusBar()->showMessage(checked ? "MRI预览已显示" : "MRI预览已隐藏", 2000);
 }
 
 void MainWindow::onNiftiError(const QString& message)
@@ -475,4 +498,10 @@ void MainWindow::updateActionStates()
     // 灰度值控制
     grayValueGroupBox->setEnabled(hasMri);
     previewButton->setEnabled(hasMri);
+    
+    // 复选框只有在预览完成后才启用，这里重置为禁用状态
+    if (!hasMri) {
+        mriPreviewCheckBox->setEnabled(false);
+        mriPreviewCheckBox->setChecked(true);
+    }
 } 

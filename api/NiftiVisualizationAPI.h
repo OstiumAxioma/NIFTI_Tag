@@ -10,6 +10,8 @@
 // VTK前向声明
 class vtkRenderer;
 class vtkImageData;
+class vtkActor;
+template<class T> class vtkSmartPointer;
 
 /**
  * @brief NIFTI脑影像可视化静态库API
@@ -248,6 +250,12 @@ public:
      * @note 使用当前设置的灰度值限制进行预览，用于调整灰度值参数
      */
     void previewMriVisualization();
+    
+    /**
+     * @brief 设置MRI预览的可见性
+     * @param visible 是否可见
+     */
+    void setMriPreviewVisible(bool visible);
 
 signals:
     /**
@@ -275,6 +283,7 @@ private:
     
     // 私有辅助方法
     void renderSingleVolume(vtkImageData* imageData, const QColor& color, const QString& name);
+    bool createMriPreviewActor(vtkImageData* imageData, vtkSmartPointer<vtkActor> actor);
 };
 
 #endif // NIFTIVISUALIZATIONAPI_H 
