@@ -59,7 +59,7 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
     this->useGrayValueLimits = (minGrayValue < maxGrayValue);
 
     try {
-        qDebug() << "开始处理区块" << label << "的surface数据（融合MRI和标签数据）";
+        qDebug() << "开始处理区块" << label << "的surface数据（改进的MRI融合算法）";
         
         // 创建阈值过滤器，提取当前标签的区域
         auto threshold = vtkSmartPointer<vtkImageThreshold>::New();
@@ -116,6 +116,10 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             qDebug() << "区块" << label << "转换后掩码标量类型:" << finalMask->GetScalarType();
         }
         
+        // 获取MRI数据的原始范围
+        double* mriRange = mriData->GetScalarRange();
+        qDebug() << "区块" << label << "MRI原始数据范围: [" << mriRange[0] << ", " << mriRange[1] << "]";
+        
         // 使用ImageMathematics将MRI数据与重采样后的掩码相乘，保留MRI的灰度信息
         auto multiply = vtkSmartPointer<vtkImageMathematics>::New();
         multiply->SetOperationToMultiply();
@@ -124,22 +128,12 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
         multiply->Update();
 
         vtkImageData* maskedMriData = multiply->GetOutput();
-        double* mriRange = maskedMriData->GetScalarRange();
+        double* maskedRange = maskedMriData->GetScalarRange();
         
-        qDebug() << "区块" << label << "掩码MRI数据范围: [" << mriRange[0] << ", " << mriRange[1] << "]";
-        
-        // 应用灰度值限制
-        double effectiveMinValue = mriRange[0];
-        double effectiveMaxValue = mriRange[1];
-        
-        if (useGrayValueLimits) {
-            effectiveMinValue = std::max(mriRange[0], minGrayValue);
-            effectiveMaxValue = std::min(mriRange[1], maxGrayValue);
-            qDebug() << "区块" << label << "应用灰度值限制: [" << effectiveMinValue << ", " << effectiveMaxValue << "]";
-        }
+        qDebug() << "区块" << label << "掩码MRI数据范围: [" << maskedRange[0] << ", " << maskedRange[1] << "]";
         
         // 检查掩码MRI数据是否有效
-        if (effectiveMaxValue <= effectiveMinValue || effectiveMaxValue == 0) {
+        if (maskedRange[1] <= maskedRange[0] || maskedRange[1] == 0) {
             qDebug() << "区块" << label << "掩码MRI数据无效，回退到使用标签数据生成surface";
             
             // 回退策略：直接使用阈值化的标签数据
@@ -165,91 +159,131 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
                 return;
             }
         } else {
-            // 正常情况：使用MRI数据生成高质量surface
-            qDebug() << "区块" << label << "使用MRI数据生成高质量surface";
+            // 正常情况：使用融合后的MRI数据生成高质量surface
+            qDebug() << "区块" << label << "使用融合MRI数据生成高质量surface";
             
-            // 使用Marching Cubes生成等值面，基于MRI数据的灰度值
-            auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
-            marchingCubes->SetInputData(maskedMriData);
+            // 应用灰度值限制的改进算法
+            vtkImageData* processedData = maskedMriData;
+            vtkSmartPointer<vtkImageThreshold> grayThreshold;
             
-            // 改进的多阈值算法，更好地显示脑沟回
-            QList<double> thresholds;
-            double dataRange = effectiveMaxValue - effectiveMinValue;
-            
-            if (dataRange > 0) {
-                // 使用多个阈值来更好地捕获脑组织的细节
-                // 低阈值：捕获脑实质边界
-                double lowThreshold = effectiveMinValue + dataRange * 0.15;
-                // 中阈值：捕获灰质/白质边界
-                double midThreshold = effectiveMinValue + dataRange * 0.35;
-                // 高阈值：捕获高密度区域
-                double highThreshold = effectiveMinValue + dataRange * 0.65;
+            if (useGrayValueLimits) {
+                qDebug() << "区块" << label << "应用灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
                 
-                // 根据数据范围选择最合适的阈值
+                // 创建一个更温和的灰度值过滤器
+                grayThreshold = vtkSmartPointer<vtkImageThreshold>::New();
+                grayThreshold->SetInputData(maskedMriData);
+                grayThreshold->ThresholdBetween(minGrayValue, maxGrayValue);
+                grayThreshold->SetInValue(1.0);
+                grayThreshold->SetOutValue(0.0);
+                grayThreshold->ReplaceInOff();  // 保持原值，不替换
+                grayThreshold->ReplaceOutOn();  // 只替换范围外的值
+                grayThreshold->Update();
+                
+                processedData = grayThreshold->GetOutput();
+                double* processedRange = processedData->GetScalarRange();
+                qDebug() << "区块" << label << "灰度值限制后范围: [" << processedRange[0] << ", " << processedRange[1] << "]";
+                
+                // 如果灰度值限制后数据太少，回退到原始掩码数据
+                if (processedRange[1] <= processedRange[0] || processedRange[1] < minGrayValue * 0.1) {
+                    qDebug() << "区块" << label << "灰度值限制过于严格，回退到原始掩码数据";
+                    processedData = maskedMriData;
+                }
+            }
+            
+            // 获取最终处理数据的范围
+            double* finalRange = processedData->GetScalarRange();
+            double dataRange = finalRange[1] - finalRange[0];
+            
+            // 改进的阈值计算 - 防止过度细分
+            double dynamicThreshold;
+            
+            if (useGrayValueLimits && dataRange > 0) {
+                // 使用更保守的阈值策略，避免过度细分
+                double baseThreshold = finalRange[0] + dataRange * 0.3;  // 提高基础阈值
+                
+                // 确保阈值不会太低，避免生成过多细小区域
+                double minAllowedThreshold = std::max(finalRange[0] + dataRange * 0.2, minGrayValue * 0.8);
+                dynamicThreshold = std::max(baseThreshold, minAllowedThreshold);
+                
+                qDebug() << "区块" << label << "使用保守的灰度值限制阈值:" << dynamicThreshold 
+                         << "（数据范围:" << finalRange[0] << "-" << finalRange[1] << "）";
+            } else {
+                // 传统方法，使用更高的阈值避免过度细分
                 if (dataRange > 1000) {
-                    // 高动态范围数据，使用中等阈值
-                    thresholds << midThreshold;
+                    dynamicThreshold = finalRange[0] + dataRange * 0.4;  // 提高阈值
                 } else if (dataRange > 100) {
-                    // 中等动态范围数据，使用低阈值
-                    thresholds << lowThreshold;
+                    dynamicThreshold = finalRange[0] + dataRange * 0.25; // 提高阈值
                 } else {
-                    // 低动态范围数据，使用非常低的阈值
-                    thresholds << (effectiveMinValue + dataRange * 0.05);
+                    dynamicThreshold = finalRange[0] + dataRange * 0.15; // 提高阈值
                 }
                 
-                qDebug() << "区块" << label << "数据范围:" << dataRange 
-                         << "低阈值:" << lowThreshold 
-                         << "中阈值:" << midThreshold 
-                         << "高阈值:" << highThreshold;
-            } else {
-                // 回退到简单阈值
-                thresholds << (effectiveMinValue + 0.1);
+                qDebug() << "区块" << label << "使用传统保守阈值:" << dynamicThreshold;
             }
             
-            // 设置阈值（使用第一个阈值）
-            if (!thresholds.isEmpty()) {
-                marchingCubes->SetValue(0, thresholds[0]);
-                qDebug() << "区块" << label << "使用MRI阈值: " << thresholds[0];
-            }
-            
-            marchingCubes->ComputeNormalsOn();  // 启用法线计算
-            marchingCubes->ComputeGradientsOn(); // 启用梯度计算
+            // 使用Marching Cubes生成等值面
+            auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
+            marchingCubes->SetInputData(processedData);
+            marchingCubes->SetValue(0, dynamicThreshold);
+            marchingCubes->ComputeNormalsOn();
+            marchingCubes->ComputeGradientsOn();
             marchingCubes->Update();
 
             // 检查Marching Cubes是否生成了有效的多边形数据
             vtkPolyData* polyData = marchingCubes->GetOutput();
             if (!polyData || polyData->GetNumberOfPoints() == 0 || polyData->GetNumberOfCells() == 0) {
-                qDebug() << "区块" << label << "Marching Cubes没有生成有效数据，跳过平滑处理";
+                qDebug() << "区块" << label << "Marching Cubes没有生成有效数据，尝试更低阈值";
                 
-                // 直接使用Marching Cubes的输出
-                surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
-            } else {
-                qDebug() << "区块" << label << "Marching Cubes生成了" << polyData->GetNumberOfPoints() << "个点和" << polyData->GetNumberOfCells() << "个面";
-                
-                // 添加平滑处理以提高surface质量
-                auto smoother = vtkSmartPointer<vtkSmoothPolyDataFilter>::New();
-                smoother->SetInputConnection(marchingCubes->GetOutputPort());
-                smoother->SetNumberOfIterations(10);  // 平滑迭代次数
-                smoother->SetRelaxationFactor(0.1);   // 松弛因子
-                smoother->FeatureEdgeSmoothingOff();  // 关闭特征边平滑以保持形状
-                smoother->BoundarySmoothingOn();      // 启用边界平滑
-                
-                try {
-                    smoother->Update();
+                // 尝试更低的阈值，但不要过低
+                double lowerThreshold = finalRange[0] + dataRange * 0.15;
+                if (lowerThreshold < dynamicThreshold) {
+                    marchingCubes->SetValue(0, lowerThreshold);
+                    marchingCubes->Update();
                     
-                    // 检查平滑后的数据
-                    vtkPolyData* smoothedData = smoother->GetOutput();
-                    if (smoothedData && smoothedData->GetNumberOfPoints() > 0) {
-                        qDebug() << "区块" << label << "平滑处理成功";
-                        surfaceMapper->SetInputConnection(smoother->GetOutputPort());
+                    polyData = marchingCubes->GetOutput();
+                    if (polyData && polyData->GetNumberOfPoints() > 0) {
+                        qDebug() << "区块" << label << "使用降低阈值" << lowerThreshold << "生成了" << polyData->GetNumberOfPoints() << "个点";
                     } else {
-                        qDebug() << "区块" << label << "平滑处理失败，使用原始数据";
+                        qDebug() << "区块" << label << "降低阈值后仍无法生成有效数据";
                         surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
+                        return;
                     }
-                } catch (const std::exception& e) {
-                    qDebug() << "区块" << label << "平滑处理异常:" << e.what() << "，使用原始数据";
+                } else {
+                    qDebug() << "区块" << label << "无法进一步降低阈值，跳过处理";
+                    surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
+                    return;
+                }
+            } else {
+                qDebug() << "区块" << label << "Marching Cubes成功生成了" << polyData->GetNumberOfPoints() << "个点和" << polyData->GetNumberOfCells() << "个面";
+                
+                // 检查是否生成了过多的点，这可能导致性能问题
+                if (polyData->GetNumberOfPoints() > 100000) {
+                    qDebug() << "区块" << label << "警告：生成的点数过多(" << polyData->GetNumberOfPoints() << ")，可能影响性能";
+                }
+            }
+            
+            // 添加平滑处理以提高surface质量，但减少迭代次数以提高性能
+            auto smoother = vtkSmartPointer<vtkSmoothPolyDataFilter>::New();
+            smoother->SetInputConnection(marchingCubes->GetOutputPort());
+            smoother->SetNumberOfIterations(10);  // 减少迭代次数
+            smoother->SetRelaxationFactor(0.1);   // 松弛因子
+            smoother->FeatureEdgeSmoothingOff();  // 关闭特征边平滑以保持形状
+            smoother->BoundarySmoothingOn();      // 启用边界平滑
+            
+            try {
+                smoother->Update();
+                
+                // 检查平滑后的数据
+                vtkPolyData* smoothedData = smoother->GetOutput();
+                if (smoothedData && smoothedData->GetNumberOfPoints() > 0) {
+                    qDebug() << "区块" << label << "平滑处理成功，生成" << smoothedData->GetNumberOfPoints() << "个点";
+                    surfaceMapper->SetInputConnection(smoother->GetOutputPort());
+                } else {
+                    qDebug() << "区块" << label << "平滑处理失败，使用原始数据";
                     surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
                 }
+            } catch (const std::exception& e) {
+                qDebug() << "区块" << label << "平滑处理异常:" << e.what() << "，使用原始数据";
+                surfaceMapper->SetInputConnection(marchingCubes->GetOutputPort());
             }
         }
         
@@ -262,7 +296,7 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
             centroid = QVector3D(0, 0, 0); // 设置默认质心
         }
         
-        qDebug() << "区块" << label << "高质量surface数据设置完成";
+        qDebug() << "区块" << label << "改进的MRI融合surface数据设置完成";
 
     }
     catch (const std::exception& e) {

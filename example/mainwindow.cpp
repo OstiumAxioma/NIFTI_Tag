@@ -21,6 +21,7 @@
 #include <QSpinBox>
 #include <QGroupBox>
 #include <QCheckBox>
+#include <QDebug>
 
 // VTK头文件
 #include <vtkSmartPointer.h>
@@ -221,10 +222,10 @@ void MainWindow::setupRegionControlPanel()
     minGrayLayout->addWidget(new QLabel("最小值:"));
     minGraySlider = new QSlider(Qt::Horizontal);
     minGraySlider->setRange(0, 10000);
-    minGraySlider->setValue(0);
+    minGraySlider->setValue(4444);
     minGraySpinBox = new QSpinBox();
     minGraySpinBox->setRange(0, 10000);
-    minGraySpinBox->setValue(0);
+    minGraySpinBox->setValue(4444);
     minGrayLayout->addWidget(minGraySlider);
     minGrayLayout->addWidget(minGraySpinBox);
     grayLayout->addLayout(minGrayLayout);
@@ -234,10 +235,10 @@ void MainWindow::setupRegionControlPanel()
     maxGrayLayout->addWidget(new QLabel("最大值:"));
     maxGraySlider = new QSlider(Qt::Horizontal);
     maxGraySlider->setRange(0, 10000);
-    maxGraySlider->setValue(3000);
+    maxGraySlider->setValue(4949);
     maxGraySpinBox = new QSpinBox();
     maxGraySpinBox->setRange(0, 10000);
-    maxGraySpinBox->setValue(3000);
+    maxGraySpinBox->setValue(4949);
     maxGrayLayout->addWidget(maxGraySlider);
     maxGrayLayout->addWidget(maxGraySpinBox);
     grayLayout->addLayout(maxGrayLayout);
@@ -337,7 +338,19 @@ void MainWindow::processNiftiRegions()
     }
     
     statusBar()->showMessage("正在通过API处理脑区块...");
-    niftiAPI->processRegions();
+    
+    // 获取当前设置的灰度值限制
+    double minGrayValue = minGraySpinBox->value();
+    double maxGrayValue = maxGraySpinBox->value();
+    
+    // 使用灰度值限制处理区块
+    if (minGrayValue < maxGrayValue) {
+        niftiAPI->processRegions(minGrayValue, maxGrayValue);
+        qDebug() << "使用灰度值限制处理区块: [" << minGrayValue << ", " << maxGrayValue << "]";
+    } else {
+        niftiAPI->processRegions();
+        qDebug() << "使用默认参数处理区块";
+    }
 }
 
 void MainWindow::updateUiForRegions()
