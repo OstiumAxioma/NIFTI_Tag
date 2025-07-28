@@ -1,5 +1,6 @@
 #include "niftimanager.h"
 #include "brainregionvolume.h"
+#include "MultiChannelVolumeProcessor.h"
 
 #include <QDebug>
 #include <QFileInfo>
@@ -18,6 +19,7 @@ NiftiManager::NiftiManager(QObject *parent)
     , mriImage(nullptr)
     , labelImage(nullptr)
     , renderer(nullptr)
+    , volumeProcessor(nullptr)
 {
     qDebug() << "NiftiManager 初始化";
 }
@@ -25,6 +27,10 @@ NiftiManager::NiftiManager(QObject *parent)
 NiftiManager::~NiftiManager()
 {
     clearRegions();
+    if (volumeProcessor) {
+        delete volumeProcessor;
+        volumeProcessor = nullptr;
+    }
     qDebug() << "NiftiManager 析构";
 }
 
@@ -110,59 +116,13 @@ void NiftiManager::processRegions(double minGrayValue, double maxGrayValue)
         return;
     }
 
-    qDebug() << "开始处理脑区块...";
+    qDebug() << "开始处理脑区块（使用新的标签专用方法）...";
     
     // 清理旧的区块
     clearRegions();
     
-    // 提取所有标签编号
-    QList<int> labels = extractLabelsFromImage();
-    qDebug() << "发现" << labels.size() << "个标签区块:" << labels;
-    
-    // 为每个标签创建BrainRegionVolume
-    for (int label : labels) {
-        if (label == 0) continue; // 跳过背景标签
-        
-        qDebug() << "正在创建区块" << label;
-        
-        try {
-            auto* regionVolume = new BrainRegionVolume(label, this);
-            
-            // 为每个区块生成独特的颜色
-            QColor uniqueColor = generateColorForLabel(label);
-            regionVolume->updateColor(uniqueColor);
-            
-            qDebug() << "区块" << label << "分配颜色:" << uniqueColor.name() 
-                     << "RGB(" << uniqueColor.redF() << "," << uniqueColor.greenF() << "," << uniqueColor.blueF() << ")";
-            
-            // 设置体数据（MRI数据和标签掩码）
-            if (minGrayValue < maxGrayValue) {
-                regionVolume->setVolumeData(mriImage, labelImage, minGrayValue, maxGrayValue);
-                qDebug() << "区块" << label << "使用灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
-            } else {
-                regionVolume->setVolumeData(mriImage, labelImage);
-            }
-            
-            // 连接信号
-            connect(regionVolume, &BrainRegionVolume::visibilityChanged,
-                    this, &NiftiManager::regionVisibilityChanged);
-            
-            regionVolumes[label] = regionVolume;
-            
-            qDebug() << "区块" << label << "创建成功，最终颜色:" << regionVolume->getColor().name();
-            
-            // 添加到渲染器
-            if (renderer) {
-                addVolumeToRenderer(regionVolume);
-            }
-        }
-        catch (const std::exception& e) {
-            qDebug() << "创建区块" << label << "时发生错误:" << e.what();
-        }
-        catch (...) {
-            qDebug() << "创建区块" << label << "时发生未知错误";
-        }
-    }
+    // 使用新的处理方法
+    processRegionsWithNewMethod(minGrayValue, maxGrayValue);
     
     qDebug() << "脑区块处理完成，共" << regionVolumes.size() << "个区块";
     emit regionsProcessed();
@@ -284,6 +244,96 @@ void NiftiManager::setGrayValueLimits(double minGrayValue, double maxGrayValue)
     for (auto* volume : regionVolumes.values()) {
         if (volume) {
             volume->setGrayValueLimits(minGrayValue, maxGrayValue);
+        }
+    }
+}
+
+bool NiftiManager::initializeVolumeProcessor()
+{
+    if (volumeProcessor) {
+        delete volumeProcessor;
+    }
+    
+    volumeProcessor = new MultiChannelVolumeProcessor(this);
+    
+    if (!volumeProcessor->setInputData(mriImage, labelImage)) {
+        qDebug() << "错误：无法设置多通道处理器输入数据";
+        delete volumeProcessor;
+        volumeProcessor = nullptr;
+        return false;
+    }
+    
+    if (!volumeProcessor->processFusedData()) {
+        qDebug() << "错误：无法处理融合数据";
+        delete volumeProcessor;
+        volumeProcessor = nullptr;
+        return false;
+    }
+    
+    qDebug() << "多通道处理器初始化成功";
+    return true;
+}
+
+void NiftiManager::processRegionsWithNewMethod(double minGrayValue, double maxGrayValue)
+{
+    // 初始化多通道处理器
+    if (!initializeVolumeProcessor()) {
+        emit errorOccurred("无法初始化多通道处理器");
+        return;
+    }
+    
+    // 获取所有唯一标签
+    QVector<int> labels = volumeProcessor->getUniqueLabels();
+    qDebug() << "发现" << labels.size() << "个标签区块:" << labels;
+    
+    // 为每个标签创建BrainRegionVolume
+    for (int label : labels) {
+        if (label == 0) continue; // 跳过背景标签
+        
+        qDebug() << "正在创建区块" << label << "（新方法）";
+        
+        try {
+            auto* regionVolume = new BrainRegionVolume(label, this);
+            
+            // 为每个区块生成独特的颜色
+            QColor uniqueColor = generateColorForLabel(label);
+            regionVolume->updateColor(uniqueColor);
+            
+            qDebug() << "区块" << label << "分配颜色:" << uniqueColor.name();
+            
+            // 使用新方法：创建标签专用的MRI数据
+            vtkSmartPointer<vtkImageData> labelSpecificData = 
+                volumeProcessor->createLabelSpecificMriData(label);
+            
+            if (labelSpecificData) {
+                // 使用新的setVolumeData方法
+                regionVolume->setVolumeData(labelSpecificData, minGrayValue, maxGrayValue);
+                qDebug() << "区块" << label << "使用新方法设置数据成功";
+            } else {
+                qDebug() << "错误：无法为标签" << label << "创建专用MRI数据";
+                delete regionVolume;
+                continue;
+            }
+            
+            // 连接信号
+            connect(regionVolume, &BrainRegionVolume::visibilityChanged,
+                    this, &NiftiManager::regionVisibilityChanged);
+            
+            regionVolumes[label] = regionVolume;
+            
+            qDebug() << "区块" << label << "创建成功，包含" 
+                     << regionVolume->getVoxelCount() << "个有效体素";
+            
+            // 添加到渲染器
+            if (renderer) {
+                addVolumeToRenderer(regionVolume);
+            }
+        }
+        catch (const std::exception& e) {
+            qDebug() << "创建区块" << label << "时发生错误:" << e.what();
+        }
+        catch (...) {
+            qDebug() << "创建区块" << label << "时发生未知错误";
         }
     }
 } 

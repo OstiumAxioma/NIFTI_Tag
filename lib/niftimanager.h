@@ -15,6 +15,7 @@
 
 // 前向声明
 class BrainRegionVolume;
+class MultiChannelVolumeProcessor;
 
 class NiftiManager : public QObject
 {
@@ -62,12 +63,19 @@ private:
     vtkSmartPointer<vtkImageData> labelImage;
     QMap<int, BrainRegionVolume*> regionVolumes;
     vtkRenderer* renderer;
+    
+    // 新增：多通道处理器
+    MultiChannelVolumeProcessor* volumeProcessor;
 
     // 私有方法
     QList<int> extractLabelsFromImage();
     QColor generateColorForLabel(int label);
     void addVolumeToRenderer(BrainRegionVolume* volume);
     void removeVolumeFromRenderer(BrainRegionVolume* volume);
+    
+    // 新增：新的处理方法
+    bool initializeVolumeProcessor();
+    void processRegionsWithNewMethod(double minGrayValue, double maxGrayValue);
 };
 
 #endif // NIFTIMANAGER_H 

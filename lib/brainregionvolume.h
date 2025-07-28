@@ -29,10 +29,12 @@ public:
     // VTK对象获取
     vtkActor* getSurfaceActor() const { return surfaceActor; }
 
-    // 数据设置
-    void setVolumeData(vtkImageData* mriData, vtkImageData* maskData);
-    void setVolumeData(vtkImageData* mriData, vtkImageData* maskData, double minGrayValue, double maxGrayValue);
+    // 数据设置（新方法：使用标签专用MRI数据）
+    void setVolumeData(vtkImageData* labelSpecificMriData, double minGrayValue, double maxGrayValue);
     void calculateCentroid();
+    
+    // 新增：获取体素数量统计
+    int getVoxelCount() const { return voxelCount; }
 
     // 显示控制
     void updateVisibility(bool visible);
@@ -65,6 +67,9 @@ private:
     double minGrayValue;
     double maxGrayValue;
     bool useGrayValueLimits;
+    
+    // 统计信息
+    int voxelCount;  // 该标签的体素数量
 
     // 私有方法
     void initializeSurfaceActor();

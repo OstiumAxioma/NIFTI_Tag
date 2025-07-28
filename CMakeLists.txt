@@ -58,6 +58,7 @@ set(LIBRARY_SOURCES
     lib/NiftiVisualizationAPI.cpp
     lib/niftimanager.cpp
     lib/brainregionvolume.cpp
+    lib/MultiChannelVolumeProcessor.cpp
 )
 
 # 静态库头文件
@@ -65,6 +66,7 @@ set(LIBRARY_HEADERS
     api/NiftiVisualizationAPI.h
     lib/niftimanager.h
     lib/brainregionvolume.h
+    lib/MultiChannelVolumeProcessor.h
 )
 
 # 创建静态库
@@ -99,7 +101,7 @@ endif()
 
 # 示例程序源文件
 set(EXAMPLE_SOURCES
-    src/main.cpp
+    example/main.cpp
     example/mainwindow.cpp
 )
 

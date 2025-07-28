@@ -3,7 +3,7 @@
 #include <QMessageBox>
 #include <QDebug>
 #include <vtkObject.h>
-#include "../example/mainwindow.h"
+#include "mainwindow.h"
 
 int main(int argc, char *argv[])
 {
