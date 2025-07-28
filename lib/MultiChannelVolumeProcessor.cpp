@@ -1,4 +1,5 @@
 #include "MultiChannelVolumeProcessor.h"
+#include "ImprovedNearestNeighborAssigner.h"
 #include <QDebug>
 #include <QSet>
 #include <vtkImageData.h>
@@ -16,6 +17,7 @@ MultiChannelVolumeProcessor::MultiChannelVolumeProcessor(QObject *parent)
     , mriData(nullptr)
     , labelData(nullptr)
     , fusedVtkData(nullptr)
+    , nearestNeighborAssigner(nullptr)
 {
     dimensions[0] = dimensions[1] = dimensions[2] = 0;
     spacing[0] = spacing[1] = spacing[2] = 1.0;
@@ -24,6 +26,10 @@ MultiChannelVolumeProcessor::MultiChannelVolumeProcessor(QObject *parent)
 
 MultiChannelVolumeProcessor::~MultiChannelVolumeProcessor()
 {
+    if (nearestNeighborAssigner) {
+        delete nearestNeighborAssigner;
+        nearestNeighborAssigner = nullptr;
+    }
     qDebug() << "MultiChannelVolumeProcessor析构";
 }
 
@@ -143,7 +149,23 @@ void MultiChannelVolumeProcessor::extractUniqueLabels()
 
 void MultiChannelVolumeProcessor::assignNearestNeighborLabels()
 {
-    qDebug() << "开始分配最近邻标签...";
+    qDebug() << "使用改进算法分配最近邻标签...";
+    
+    // 初始化改进的分配器
+    if (nearestNeighborAssigner) {
+        delete nearestNeighborAssigner;
+    }
+    nearestNeighborAssigner = new ImprovedNearestNeighborAssigner(dimensions, spacing);
+    
+    // 使用改进算法分配标签
+    int assignedCount = nearestNeighborAssigner->assignNearestNeighborLabels(fusedData, uniqueLabels);
+    
+    qDebug() << "改进算法分配完成，共分配了" << assignedCount << "个体素";
+}
+
+void MultiChannelVolumeProcessor::assignNearestNeighborLabelsLegacy()
+{
+    qDebug() << "使用传统方法分配最近邻标签(回退方案)...";
     
     int assignedCount = 0;
     int totalVoxels = fusedData.size();
@@ -158,7 +180,7 @@ void MultiChannelVolumeProcessor::assignNearestNeighborLabels()
             int y = (i % (dimensions[0] * dimensions[1])) / dimensions[0];
             int x = i % dimensions[0];
             
-            int nearestLabel = findNearestLabel(x, y, z);
+            int nearestLabel = findNearestLabelLegacy(x, y, z);
             if (nearestLabel > 0) {
                 voxel.label = nearestLabel;
                 assignedCount++;
@@ -166,20 +188,20 @@ void MultiChannelVolumeProcessor::assignNearestNeighborLabels()
         }
     }
     
-    qDebug() << "最近邻标签分配完成，共分配了" << assignedCount << "个体素";
+    qDebug() << "传统方法分配完成，共分配了" << assignedCount << "个体素";
 }
 
-int MultiChannelVolumeProcessor::findNearestLabel(int x, int y, int z)
+int MultiChannelVolumeProcessor::findNearestLabelLegacy(int x, int y, int z)
 {
-    const int maxSearchRadius = 10;  // 最大搜索半径
+    const int maxSearchRadius = 25;  // 扩大搜索半径
     
     for (int radius = 1; radius <= maxSearchRadius; radius++) {
-        // 在当前半径内搜索
+        // 在当前半径内搜索所有点（不只是边界）
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dy = -radius; dy <= radius; dy++) {
                 for (int dx = -radius; dx <= radius; dx++) {
-                    // 跳过不在当前半径边界上的点
-                    if (abs(dx) != radius && abs(dy) != radius && abs(dz) != radius) {
+                    // 跳过中心点
+                    if (dx == 0 && dy == 0 && dz == 0) {
                         continue;
                     }
                     
@@ -201,8 +223,8 @@ int MultiChannelVolumeProcessor::findNearestLabel(int x, int y, int z)
         }
     }
     
-    // 如果在最大搜索半径内找不到标签，返回第一个可用标签
-    return uniqueLabels.isEmpty() ? 0 : uniqueLabels.first();
+    // 如果在最大搜索半径内找不到标签，返回0（保持无标签状态）
+    return 0;
 }
 
 void MultiChannelVolumeProcessor::createFusedVtkData()

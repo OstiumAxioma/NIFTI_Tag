@@ -6,6 +6,10 @@
 #include <QObject>
 #include <QVector>
 #include <QVector3D>
+#include "VoxelDataTypes.h"
+
+// 前向声明
+class ImprovedNearestNeighborAssigner;
 
 /**
  * @brief 多通道体数据处理器
@@ -18,13 +22,7 @@ class MultiChannelVolumeProcessor : public QObject
     Q_OBJECT
 
 public:
-    struct VoxelData {
-        float grayValue;    // MRI灰度值
-        int label;          // 标签值
-        
-        VoxelData() : grayValue(0.0f), label(0) {}
-        VoxelData(float gray, int lbl) : grayValue(gray), label(lbl) {}
-    };
+    // 使用共享的VoxelData结构
 
     explicit MultiChannelVolumeProcessor(QObject *parent = nullptr);
     ~MultiChannelVolumeProcessor();
@@ -85,6 +83,9 @@ private:
     // 标签信息
     QVector<int> uniqueLabels;
     
+    // 改进的最近邻分配器
+    ImprovedNearestNeighborAssigner* nearestNeighborAssigner;
+    
     /**
      * @brief 验证输入数据的兼容性
      */
@@ -96,16 +97,21 @@ private:
     void extractUniqueLabels();
     
     /**
-     * @brief 为无标签的体素分配最近邻标签
+     * @brief 为无标签的体素分配最近邻标签（使用改进算法）
      */
     void assignNearestNeighborLabels();
     
     /**
-     * @brief 查找最近的有标签体素
+     * @brief 使用传统方法分配最近邻标签（回退方案）
+     */
+    void assignNearestNeighborLabelsLegacy();
+    
+    /**
+     * @brief 查找最近的有标签体素（传统方法）
      * @param x, y, z 目标体素坐标
      * @return 最近的标签值，如果找不到返回0
      */
-    int findNearestLabel(int x, int y, int z);
+    int findNearestLabelLegacy(int x, int y, int z);
     
     /**
      * @brief 创建VTK格式的融合数据

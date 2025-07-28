@@ -59,6 +59,7 @@ set(LIBRARY_SOURCES
     lib/niftimanager.cpp
     lib/brainregionvolume.cpp
     lib/MultiChannelVolumeProcessor.cpp
+    lib/ImprovedNearestNeighborAssigner.cpp
 )
 
 # 静态库头文件
@@ -67,6 +68,8 @@ set(LIBRARY_HEADERS
     lib/niftimanager.h
     lib/brainregionvolume.h
     lib/MultiChannelVolumeProcessor.h
+    lib/ImprovedNearestNeighborAssigner.h
+    lib/VoxelDataTypes.h
 )
 
 # 创建静态库
