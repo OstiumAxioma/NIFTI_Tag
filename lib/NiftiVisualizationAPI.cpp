@@ -33,6 +33,7 @@ public:
         , currentMinGrayValue(0.0)
         , currentMaxGrayValue(0.0)
         , useGrayValueLimits(false)
+        , mriPreviewOpacity(0.3)
     {
         // 创建内部NIFTI管理器
         niftiManager = new NiftiManager(q);
@@ -76,6 +77,9 @@ public:
     
     // MRI预览actor
     vtkSmartPointer<vtkActor> mriPreviewActor;
+    
+    // MRI预览透明度
+    double mriPreviewOpacity;
     
     Q_DECLARE_PUBLIC(NiftiVisualizationAPI)
 };
@@ -273,8 +277,11 @@ void NiftiVisualizationAPI::previewMriVisualization()
         d->mriPreviewActor = vtkSmartPointer<vtkActor>::New();
         
         if (createMriPreviewActor(d->niftiManager->getMriImage(), d->mriPreviewActor)) {
+            // 确保actor可见
+            d->mriPreviewActor->SetVisibility(true);
             // 添加到渲染器
             d->renderer->AddActor(d->mriPreviewActor);
+            qDebug() << "MRI预览actor已添加到渲染器，可见性:" << d->mriPreviewActor->GetVisibility();
         } else {
             qDebug() << "MRI预览actor创建失败";
             d->mriPreviewActor = nullptr;
@@ -355,6 +362,8 @@ void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QC
         // 创建mapper
         auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
         mapper->SetInputConnection(marchingCubes->GetOutputPort());
+        // 关闭标量颜色映射，使用材质颜色
+        mapper->SetScalarVisibility(false);
         
         // 创建actor
         auto actor = vtkSmartPointer<vtkActor>::New();
@@ -513,6 +522,8 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
         
         try {
             mapper->SetInputConnection(marchingCubes->GetOutputPort());
+            // 关闭标量颜色映射，使用材质颜色
+            mapper->SetScalarVisibility(false);
             mapper->Update();
         } catch (const std::exception& e) {
             qDebug() << "MRI预览mapper设置失败:" << e.what();
@@ -526,12 +537,14 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
             // 设置材质属性（半透明黑白显示）
             auto property = actor->GetProperty();
             if (property) {
-                property->SetColor(0.8, 0.8, 0.8);  // 浅灰色，呈现黑白效果
-                property->SetOpacity(0.3);  // 半透明效果
-                property->SetAmbient(0.4);   // 提高环境光，增强黑白对比
-                property->SetDiffuse(0.6);   // 调整漫反射
-                property->SetSpecular(0.1);  // 降低镜面反射，避免过亮
-                property->SetSpecularPower(5);
+                property->SetColor(0.9, 0.9, 0.9);  // 白色或浅灰色
+                property->SetOpacity(d->mriPreviewOpacity);  // 使用可配置的透明度
+                property->SetAmbient(0.3);   // 环境光
+                property->SetDiffuse(0.7);   // 漫反射
+                property->SetSpecular(0.0);  // 关闭镜面反射
+                property->SetSpecularPower(1);
+                // 强制设置为灰度渲染模式
+                property->SetInterpolationToFlat();
             }
             
             qDebug() << "MRI预览actor创建成功";
@@ -619,7 +632,7 @@ void NiftiVisualizationAPI::setGrayValueLimits(double minGrayValue, double maxGr
     d->currentMaxGrayValue = maxGrayValue;
     d->useGrayValueLimits = (minGrayValue < maxGrayValue);
     
-    qDebug() << "API设置灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "]";
+    qDebug() << "API设置灰度值限制: [" << minGrayValue << ", " << maxGrayValue << "], useGrayValueLimits:" << d->useGrayValueLimits;
     
     // 同时更新NiftiManager（如果已经有区块的话）
     if (d->niftiManager) {
@@ -748,4 +761,33 @@ bool NiftiVisualizationAPI::exportRegionInfo(const QString& filePath) const
     }
     
     return true;
+}
+
+void NiftiVisualizationAPI::setMriPreviewOpacity(double opacity)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    // 限制透明度范围在0.0-1.0之间
+    d->mriPreviewOpacity = std::max(0.0, std::min(1.0, opacity));
+    
+    // 如果MRI预览actor存在，立即更新透明度
+    if (d->mriPreviewActor) {
+        auto property = d->mriPreviewActor->GetProperty();
+        if (property) {
+            property->SetOpacity(d->mriPreviewOpacity);
+            
+            // 触发重新渲染
+            if (d->renderer && d->renderer->GetRenderWindow()) {
+                d->renderer->GetRenderWindow()->Render();
+            }
+        }
+    }
+    
+    qDebug() << "MRI预览透明度设置为:" << d->mriPreviewOpacity;
+}
+
+double NiftiVisualizationAPI::getMriPreviewOpacity() const
+{
+    Q_D(const NiftiVisualizationAPI);
+    return d->mriPreviewOpacity;
 } 

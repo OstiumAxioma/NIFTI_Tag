@@ -251,6 +251,18 @@ public:
      * @param visible 是否可见
      */
     void setMriPreviewVisible(bool visible);
+    
+    /**
+     * @brief 设置MRI预览的透明度
+     * @param opacity 透明度值 (0.0-1.0)
+     */
+    void setMriPreviewOpacity(double opacity);
+    
+    /**
+     * @brief 获取MRI预览的透明度
+     * @return 当前透明度值 (0.0-1.0)
+     */
+    double getMriPreviewOpacity() const;
 
 signals:
     /**

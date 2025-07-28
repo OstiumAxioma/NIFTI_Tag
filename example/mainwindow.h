@@ -76,8 +76,10 @@ private slots:
     
     // 灰度值控制槽函数
     void onGrayValueChanged();
+    void onGraySliderReleased();
     void onPreviewButtonClicked();
     void onMriPreviewToggled(bool checked);
+    void onMriOpacityChanged();
     
     // API回调响应
     void onNiftiError(const QString& message);
@@ -112,6 +114,8 @@ private:
     QSlider *maxGraySlider;
     QSpinBox *minGraySpinBox;
     QSpinBox *maxGraySpinBox;
+    QSlider *mriOpacitySlider;
+    QSpinBox *mriOpacitySpinBox;
     QPushButton *previewButton;
     QCheckBox *mriPreviewCheckBox;
 

@@ -243,6 +243,24 @@ void MainWindow::setupRegionControlPanel()
     maxGrayLayout->addWidget(maxGraySpinBox);
     grayLayout->addLayout(maxGrayLayout);
     
+    // MRI透明度控制
+    QHBoxLayout *opacityLayout = new QHBoxLayout();
+    QLabel *opacityLabel = new QLabel("MRI透明度 (%):");
+    opacityLayout->addWidget(opacityLabel);
+    
+    mriOpacitySpinBox = new QSpinBox();
+    mriOpacitySpinBox->setRange(0, 100);
+    mriOpacitySpinBox->setValue(30);  // 默认30%透明度
+    mriOpacitySpinBox->setSuffix("%");
+    
+    mriOpacitySlider = new QSlider(Qt::Horizontal);
+    mriOpacitySlider->setRange(0, 100);
+    mriOpacitySlider->setValue(30);
+    
+    opacityLayout->addWidget(mriOpacitySlider);
+    opacityLayout->addWidget(mriOpacitySpinBox);
+    grayLayout->addLayout(opacityLayout);
+    
     // 预览按钮和显示开关
     QHBoxLayout *previewLayout = new QHBoxLayout();
     previewButton = new QPushButton("预览MRI");
@@ -262,8 +280,15 @@ void MainWindow::setupRegionControlPanel()
     connect(maxGraySlider, &QSlider::valueChanged, maxGraySpinBox, &QSpinBox::setValue);
     connect(maxGraySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), maxGraySlider, &QSlider::setValue);
     
-    connect(minGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
-    connect(maxGraySlider, &QSlider::valueChanged, this, &MainWindow::onGrayValueChanged);
+    // 连接SpinBox的valueChanged信号来实时更新API中的灰度值限制
+    connect(minGraySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::onGrayValueChanged);
+    connect(maxGraySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::onGrayValueChanged);
+    connect(mriOpacitySlider, &QSlider::valueChanged, mriOpacitySpinBox, &QSpinBox::setValue);
+    connect(mriOpacitySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), mriOpacitySlider, &QSlider::setValue);
+    
+    connect(minGraySlider, &QSlider::sliderReleased, this, &MainWindow::onGraySliderReleased);
+    connect(maxGraySlider, &QSlider::sliderReleased, this, &MainWindow::onGraySliderReleased);
+    connect(mriOpacitySlider, &QSlider::valueChanged, this, &MainWindow::onMriOpacityChanged);
     connect(previewButton, &QPushButton::clicked, this, &MainWindow::onPreviewButtonClicked);
     connect(mriPreviewCheckBox, &QCheckBox::toggled, this, &MainWindow::onMriPreviewToggled);
     
@@ -411,6 +436,25 @@ void MainWindow::onGrayValueChanged()
     statusBar()->showMessage(QString("灰度值限制: [%1, %2]").arg(minValue).arg(maxValue), 2000);
 }
 
+void MainWindow::onGraySliderReleased()
+{
+    if (!niftiAPI) return;
+    
+    // 滑条松手时自动触发MRI预览
+    double minValue = minGraySpinBox->value();
+    double maxValue = maxGraySpinBox->value();
+    
+    // 确保值的有效性
+    if (minValue < maxValue) {
+        statusBar()->showMessage("滑条调整完成，正在预览MRI...");
+        // 首先设置灰度值限制到API
+        niftiAPI->setGrayValueLimits(minValue, maxValue);
+        // 然后触发MRI预览
+        niftiAPI->previewMriVisualization();
+        statusBar()->showMessage(QString("MRI预览更新 - 灰度值: [%1, %2]").arg(minValue).arg(maxValue), 2000);
+    }
+}
+
 void MainWindow::onPreviewButtonClicked()
 {
     if (!niftiAPI) return;
@@ -434,6 +478,19 @@ void MainWindow::onMriPreviewToggled(bool checked)
     niftiAPI->setMriPreviewVisible(checked);
     
     statusBar()->showMessage(checked ? "MRI预览已显示" : "MRI预览已隐藏", 2000);
+}
+
+void MainWindow::onMriOpacityChanged()
+{
+    if (!niftiAPI) return;
+    
+    // 将百分比转换为0.0-1.0范围的透明度值
+    double opacity = mriOpacitySpinBox->value() / 100.0;
+    
+    // 设置MRI预览的透明度
+    niftiAPI->setMriPreviewOpacity(opacity);
+    
+    statusBar()->showMessage(QString("MRI透明度设置为: %1%").arg(mriOpacitySpinBox->value()), 2000);
 }
 
 void MainWindow::onNiftiError(const QString& message)
