@@ -9,7 +9,6 @@
 #include <vtkPointData.h>
 #include <vtkDataArray.h>
 #include <vtkCamera.h>
-#include <vtkSphereSource.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkActor.h>
 #include <vtkProperty.h>
@@ -33,7 +32,6 @@ BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
     , useGrayValueLimits(false)
 {
     initializeSurfaceActor();
-    initializeCentroidSphere();
     qDebug() << "BrainRegionVolume" << label << "初始化，默认颜色:" << color.name();
 }
 
@@ -276,17 +274,6 @@ void BrainRegionVolume::calculateCentroid()
     centroid.setY(centerY);
     centroid.setZ(centerZ);
 
-    // 更新质心球体位置
-    if (centroidSphere) {
-        auto mapper = vtkPolyDataMapper::SafeDownCast(centroidSphere->GetMapper());
-        if (mapper) {
-            auto sphereSource = vtkSphereSource::SafeDownCast(mapper->GetInputConnection(0, 0)->GetProducer());
-            if (sphereSource) {
-                sphereSource->SetCenter(centroid.x(), centroid.y(), centroid.z());
-                sphereSource->Modified();
-            }
-        }
-    }
 
     qDebug() << "区块" << label << "质心:" << centroid << "（基于PolyData边界）";
 }
@@ -299,7 +286,6 @@ void BrainRegionVolume::updateVisibility(bool visible)
     if (surfaceActor) {
         surfaceActor->SetVisibility(visible);
     }
-    centroidSphere->SetVisibility(false); // 质心球体始终隐藏
 
     qDebug() << "区块" << label << "可见性:" << visible;
     emit visibilityChanged(label, visible);
@@ -316,17 +302,6 @@ void BrainRegionVolume::updateColor(const QColor& color)
     emit colorChanged(label, color);
 }
 
-double BrainRegionVolume::distanceToCamera(vtkCamera* camera) const
-{
-    if (!camera) return 0.0;
-
-    double* cameraPos = camera->GetPosition();
-    double dx = centroid.x() - cameraPos[0];
-    double dy = centroid.y() - cameraPos[1];
-    double dz = centroid.z() - cameraPos[2];
-
-    return std::sqrt(dx*dx + dy*dy + dz*dz);
-}
 
 void BrainRegionVolume::setOpacity(double opacity)
 {
@@ -376,26 +351,6 @@ void BrainRegionVolume::initializeSurfaceActor()
     }
 }
 
-void BrainRegionVolume::initializeCentroidSphere()
-{
-    // 创建球体源
-    auto sphereSource = vtkSmartPointer<vtkSphereSource>::New();
-    sphereSource->SetRadius(2.0);
-    sphereSource->SetPhiResolution(8);
-    sphereSource->SetThetaResolution(8);
-
-    // 创建映射器
-    auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-    mapper->SetInputConnection(sphereSource->GetOutputPort());
-
-    // 创建演员
-    centroidSphere = vtkSmartPointer<vtkActor>::New();
-    centroidSphere->SetMapper(mapper);
-    
-    // 设置极低透明度（几乎不可见）
-    centroidSphere->GetProperty()->SetOpacity(0.001);
-    centroidSphere->SetVisibility(false);
-}
 
 void BrainRegionVolume::setupSurfaceProperty()
 {

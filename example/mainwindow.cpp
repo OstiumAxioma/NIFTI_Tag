@@ -289,10 +289,6 @@ void MainWindow::setupRegionControlPanel()
     
     layout->addLayout(buttonLayout);
     
-    sortVolumesButton = new QPushButton("排序Volume");
-    connect(sortVolumesButton, &QPushButton::clicked, 
-            this, &MainWindow::sortVolumesByCameraDistance);
-    layout->addWidget(sortVolumesButton);
     
     regionDockWidget->setWidget(dockWidgetContents);
     addDockWidget(Qt::RightDockWidgetArea, regionDockWidget);
@@ -373,12 +369,6 @@ void MainWindow::onRegionSelectionChanged(QListWidgetItem* item)
     niftiAPI->render();
 }
 
-void MainWindow::sortVolumesByCameraDistance()
-{
-    niftiAPI->sortVolumesByCamera();
-    niftiAPI->render();
-    statusBar()->showMessage("Volume排序完成", 2000);
-}
 
 void MainWindow::showAllRegions()
 {
@@ -506,7 +496,6 @@ void MainWindow::updateActionStates()
     
     showAllButton->setEnabled(hasRegions);
     hideAllButton->setEnabled(hasRegions);
-    sortVolumesButton->setEnabled(hasRegions);
     
     // 灰度值控制
     grayValueGroupBox->setEnabled(hasMri);

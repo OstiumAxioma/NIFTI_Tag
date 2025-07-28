@@ -71,7 +71,6 @@ private slots:
     // 区块管理槽函数（通过API）
     void updateUiForRegions();
     void onRegionSelectionChanged(QListWidgetItem* item);
-    void sortVolumesByCameraDistance();
     void showAllRegions();
     void hideAllRegions();
     
@@ -105,7 +104,6 @@ private:
     QListWidget *regionListWidget;
     QPushButton *showAllButton;
     QPushButton *hideAllButton;
-    QPushButton *sortVolumesButton;
     QLabel *statusLabel;
     
     // 灰度值控制

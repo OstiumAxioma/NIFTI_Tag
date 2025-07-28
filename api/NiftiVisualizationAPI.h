@@ -117,11 +117,6 @@ public:
      */
     void setAllRegionsVisibility(bool visible);
     
-    /**
-     * @brief 根据相机距离排序Volume渲染顺序
-     * @note 解决VTK 8.2多体渲染bug
-     */
-    void sortVolumesByCamera();
     
     /**
      * @brief 设置指定区块的颜色

@@ -185,32 +185,6 @@ void NiftiManager::updateRegionVisibility(int label, bool visible)
     }
 }
 
-void NiftiManager::sortVolumesByCamera(vtkCamera* camera)
-{
-    if (!camera || regionVolumes.isEmpty()) return;
-    
-    // 获取所有可见的区块
-    QList<BrainRegionVolume*> visibleVolumes;
-    for (auto* volume : regionVolumes.values()) {
-        if (volume->isVisible()) {
-            visibleVolumes.append(volume);
-        }
-    }
-    
-    // 按到相机的距离排序
-    std::sort(visibleVolumes.begin(), visibleVolumes.end(),
-              [camera](BrainRegionVolume* a, BrainRegionVolume* b) {
-                  return a->distanceToCamera(camera) > b->distanceToCamera(camera);
-              });
-    
-    // 重新添加到渲染器（远的先添加）
-    if (renderer) {
-        for (auto* volume : visibleVolumes) {
-            renderer->RemoveActor(volume->getSurfaceActor());
-            renderer->AddActor(volume->getSurfaceActor());
-        }
-    }
-}
 
 QList<int> NiftiManager::getAllLabels() const
 {
@@ -293,7 +267,6 @@ void NiftiManager::addVolumeToRenderer(BrainRegionVolume* volume)
 {
     if (renderer && volume) {
         renderer->AddActor(volume->getSurfaceActor());
-        renderer->AddActor(volume->getCentroidSphere());
     }
 }
 
@@ -301,7 +274,6 @@ void NiftiManager::removeVolumeFromRenderer(BrainRegionVolume* volume)
 {
     if (renderer && volume) {
         renderer->RemoveActor(volume->getSurfaceActor());
-        renderer->RemoveActor(volume->getCentroidSphere());
     }
 }
 

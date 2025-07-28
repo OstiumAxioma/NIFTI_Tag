@@ -159,7 +159,6 @@ void NiftiVisualizationAPI::processRegions()
             auto* volume = d->niftiManager->getRegionVolume(label);
             if (volume) {
                 d->renderer->AddActor(volume->getSurfaceActor());
-                d->renderer->AddActor(volume->getCentroidSphere());
             }
         }
         
@@ -191,7 +190,6 @@ void NiftiVisualizationAPI::processRegions(double minGrayValue, double maxGrayVa
             auto* volume = d->niftiManager->getRegionVolume(label);
             if (volume) {
                 d->renderer->AddActor(volume->getSurfaceActor());
-                d->renderer->AddActor(volume->getCentroidSphere());
             }
         }
         
@@ -593,13 +591,6 @@ void NiftiVisualizationAPI::setAllRegionsVisibility(bool visible)
     }
 }
 
-void NiftiVisualizationAPI::sortVolumesByCamera()
-{
-    Q_D(NiftiVisualizationAPI);
-    if (d->renderer) {
-        d->niftiManager->sortVolumesByCamera(d->renderer->GetActiveCamera());
-    }
-}
 
 void NiftiVisualizationAPI::setRegionColor(int label, const QColor& color)
 {

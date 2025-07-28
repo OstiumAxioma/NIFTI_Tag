@@ -35,7 +35,6 @@ public:
 
     // 区块管理
     void updateRegionVisibility(int label, bool visible);
-    void sortVolumesByCamera(vtkCamera* camera);
     void setGrayValueLimits(double minGrayValue, double maxGrayValue);
     
     // 获取信息

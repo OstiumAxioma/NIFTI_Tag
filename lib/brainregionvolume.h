@@ -11,7 +11,6 @@
 #include <vtkImageData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkProperty.h>
-#include <vtkCamera.h>
 
 class BrainRegionVolume : public QObject
 {
@@ -29,7 +28,6 @@ public:
 
     // VTK对象获取
     vtkActor* getSurfaceActor() const { return surfaceActor; }
-    vtkActor* getCentroidSphere() const { return centroidSphere; }
 
     // 数据设置
     void setVolumeData(vtkImageData* mriData, vtkImageData* maskData);
@@ -40,8 +38,6 @@ public:
     void updateVisibility(bool visible);
     void updateColor(const QColor& color);
 
-    // 渲染排序
-    double distanceToCamera(vtkCamera* camera) const;
 
     // 体绘制参数
     void setOpacity(double opacity);
@@ -64,7 +60,6 @@ private:
     // VTK对象
     vtkSmartPointer<vtkActor> surfaceActor;
     vtkSmartPointer<vtkPolyDataMapper> surfaceMapper;
-    vtkSmartPointer<vtkActor> centroidSphere;
     
     // 灰度值限制参数
     double minGrayValue;
@@ -73,7 +68,6 @@ private:
 
     // 私有方法
     void initializeSurfaceActor();
-    void initializeCentroidSphere();
     void setupSurfaceProperty();
     void updateSurfaceColor();
     void updateSurfaceOpacity();
