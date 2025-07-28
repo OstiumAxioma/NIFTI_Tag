@@ -20,6 +20,9 @@
 #include <vtkSmoothPolyDataFilter.h>
 #include <vtkImageCast.h>
 #include <vtkImageMask.h>
+#include <vtkImageGaussianSmooth.h>
+#include <vtkWindowedSincPolyDataFilter.h>
+#include <vtkLinearSubdivisionFilter.h>
 
 BrainRegionVolume::BrainRegionVolume(int label, QObject *parent)
     : QObject(parent)
@@ -140,9 +143,30 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
         } else {
             qDebug() << "区块" << label << "使用MRI数据生成详细表面";
             
+            // 首先对输入数据进行高斯平滑以减少锯齿
+            vtkSmartPointer<vtkImageGaussianSmooth> gaussianSmooth;
+            vtkImageData* smoothedData = processedData;  // 默认使用原始数据
+            
+            try {
+                qDebug() << "区块" << label << "开始高斯平滑处理";
+                gaussianSmooth = vtkSmartPointer<vtkImageGaussianSmooth>::New();
+                gaussianSmooth->SetInputData(processedData);
+                gaussianSmooth->SetStandardDeviations(0.5, 0.5, 0.5);  // 降低平滑强度
+                gaussianSmooth->SetRadiusFactors(1.5, 1.5, 1.5);      // 减小平滑半径
+                gaussianSmooth->Update();
+                smoothedData = gaussianSmooth->GetOutput();
+                qDebug() << "区块" << label << "高斯平滑完成";
+            } catch (const std::exception& e) {
+                qDebug() << "区块" << label << "高斯平滑失败，使用原始数据:" << e.what();
+                smoothedData = processedData;
+            } catch (...) {
+                qDebug() << "区块" << label << "高斯平滑发生未知错误，使用原始数据";
+                smoothedData = processedData;
+            }
+            
             // 创建Marching Cubes
             auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
-            marchingCubes->SetInputData(processedData);
+            marchingCubes->SetInputData(smoothedData);  // 使用安全的数据源
             marchingCubes->ComputeNormalsOn();
             marchingCubes->ComputeGradientsOff();
             
@@ -196,33 +220,109 @@ void BrainRegionVolume::setVolumeData(vtkImageData* mriData, vtkImageData* maskD
                      << polyData->GetNumberOfPoints() << "个点，"
                      << polyData->GetNumberOfCells() << "个面";
             
-            // 应用平滑处理来填充小孔并改善表面质量
-            auto smoother = vtkSmartPointer<vtkSmoothPolyDataFilter>::New();
-            smoother->SetInputConnection(marchingCubes->GetOutputPort());
+            // 禁用问题的Sinc平滑器，直接使用传统平滑器
+            qDebug() << "区块" << label << "使用传统平滑器替代Sinc平滑器";
+            vtkAlgorithmOutput* smoothInput = marchingCubes->GetOutputPort();
+            bool useSincSmoother = false;
             
-            // 根据点数调整平滑参数
+            // 使用传统平滑器作为主要平滑方案
+            qDebug() << "区块" << label << "初始化传统平滑器";
+            auto smoother = vtkSmartPointer<vtkSmoothPolyDataFilter>::New();
+            smoother->SetInputConnection(smoothInput);
+            
+            // 设置传统平滑器参数以获得好的平滑效果
             if (polyData->GetNumberOfPoints() < 10000) {
-                // 小模型：更多迭代，更强平滑
-                smoother->SetNumberOfIterations(50);
+                // 小模型：更强平滑
+                smoother->SetNumberOfIterations(40);
                 smoother->SetRelaxationFactor(0.15);
                 qDebug() << "区块" << label << "应用强平滑（小模型）";
             } else if (polyData->GetNumberOfPoints() < 50000) {
-                // 中等模型：适度平滑
-                smoother->SetNumberOfIterations(30);
-                smoother->SetRelaxationFactor(0.1);
-                qDebug() << "区块" << label << "应用中等平滑";
+                // 中等模型：中等平滑
+                smoother->SetNumberOfIterations(25);
+                smoother->SetRelaxationFactor(0.12);
+                qDebug() << "区块" << label << "应用中等平滑（中等模型）";
             } else {
-                // 大模型：轻微平滑以保持性能
+                // 大模型：适度平滑
                 smoother->SetNumberOfIterations(15);
-                smoother->SetRelaxationFactor(0.05);
-                qDebug() << "区块" << label << "应用轻微平滑（大模型）";
+                smoother->SetRelaxationFactor(0.08);
+                qDebug() << "区块" << label << "应用适度平滑（大模型）";
             }
             
-            smoother->FeatureEdgeSmoothingOff();  // 关闭特征边平滑，让表面更连续
+            // 设置传统平滑器其他参数
+            smoother->FeatureEdgeSmoothingOn();   // 开启特征边平滑
+            smoother->SetFeatureAngle(60.0);      // 设置特征角度
             smoother->BoundarySmoothingOn();      // 平滑边界
-            smoother->Update();
+            smoother->SetConvergence(0.0);        // 关闭收敛检查
             
-            surfaceMapper->SetInputConnection(smoother->GetOutputPort());
+            qDebug() << "区块" << label << "开始执行传统平滑器";
+            smoother->Update();
+            qDebug() << "区块" << label << "传统平滑器完成";
+            
+            // 准备最终输出：使用传统平滑器的结果
+            qDebug() << "区块" << label << "准备最终输出";
+            vtkAlgorithmOutput* finalOutput = smoother->GetOutputPort();
+            qDebug() << "区块" << label << "传统平滑器输出已准备";
+            
+            // 暂时禁用表面细分功能避免问题
+            /*
+            if (polyData->GetNumberOfPoints() < 3000) {
+                try {
+                    qDebug() << "区块" << label << "尝试表面细分";
+                    auto subdivisionFilter = vtkSmartPointer<vtkLinearSubdivisionFilter>::New();
+                    subdivisionFilter->SetInputConnection(smoother->GetOutputPort());
+                    subdivisionFilter->SetNumberOfSubdivisions(1);
+                    subdivisionFilter->Update();
+                    finalOutput = subdivisionFilter->GetOutputPort();
+                    qDebug() << "区块" << label << "表面细分成功";
+                } catch (const std::exception& e) {
+                    qDebug() << "区块" << label << "表面细分失败:" << e.what();
+                    finalOutput = smoother->GetOutputPort();
+                } catch (...) {
+                    qDebug() << "区块" << label << "表面细分发生未知错误";
+                    finalOutput = smoother->GetOutputPort();
+                }
+            }
+            */
+            
+            // 安全设置surfaceMapper
+            try {
+                qDebug() << "区块" << label << "开始设置最终输出到surfaceMapper";
+                
+                // 再次检查surfaceMapper是否有效
+                if (!surfaceMapper) {
+                    qDebug() << "区块" << label << "surfaceMapper为空，初始化失败";
+                    return;
+                }
+                
+                // 再次检查finalOutput是否有效
+                if (!finalOutput) {
+                    qDebug() << "区块" << label << "最终输出为空，无法设置mapper";
+                    return;
+                }
+                
+                qDebug() << "区块" << label << "使用传统平滑器输出";
+                
+                // 使用传统平滑器的输出，这个连接是安全的
+                surfaceMapper->SetInputConnection(smoother->GetOutputPort());
+                qDebug() << "区块" << label << "传统平滑器连接成功";
+                
+                // 验证设置是否成功
+                qDebug() << "区块" << label << "验证mapper设置";
+                if (surfaceMapper->GetNumberOfInputConnections(0) > 0) {
+                    qDebug() << "区块" << label << "mapper输入连接数量:" << surfaceMapper->GetNumberOfInputConnections(0);
+                } else {
+                    qDebug() << "区块" << label << "mapper没有输入连接";
+                }
+                
+                qDebug() << "区块" << label << "surfaceMapper设置完成";
+                
+            } catch (const std::exception& e) {
+                qDebug() << "区块" << label << "设置surfaceMapper失败:" << e.what();
+                return;
+            } catch (...) {
+                qDebug() << "区块" << label << "设置surfaceMapper发生未知错误";
+                return;
+            }
         }
         
         // 计算质心（安全检查）
