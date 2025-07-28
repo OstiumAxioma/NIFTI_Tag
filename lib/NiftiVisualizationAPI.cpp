@@ -523,15 +523,15 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
         try {
             actor->SetMapper(mapper);
             
-            // 设置材质属性（不透明白色）
+            // 设置材质属性（半透明黑白显示）
             auto property = actor->GetProperty();
             if (property) {
-                property->SetColor(1.0, 1.0, 1.0);
-                property->SetOpacity(1.0);  // 完全不透明
-                property->SetAmbient(0.3);
-                property->SetDiffuse(0.7);
-                property->SetSpecular(0.2);
-                property->SetSpecularPower(10);
+                property->SetColor(0.8, 0.8, 0.8);  // 浅灰色，呈现黑白效果
+                property->SetOpacity(0.3);  // 半透明效果
+                property->SetAmbient(0.4);   // 提高环境光，增强黑白对比
+                property->SetDiffuse(0.6);   // 调整漫反射
+                property->SetSpecular(0.1);  // 降低镜面反射，避免过亮
+                property->SetSpecularPower(5);
             }
             
             qDebug() << "MRI预览actor创建成功";
