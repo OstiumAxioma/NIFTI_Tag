@@ -62,6 +62,7 @@ private slots:
     void createStatusBar();
     void setupSimpleWidget();
     void setupVTKWidget();
+    void setupEnhancedRendering();
     
     // NIFTI文件导入槽函数（通过API）
     void importMriNiftiFile();

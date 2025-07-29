@@ -28,6 +28,8 @@
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <vtkRenderWindowInteractor.h>
+#include <vtkLight.h>
+#include <vtkLightCollection.h>
 #include <vtkCamera.h>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -178,6 +180,9 @@ void MainWindow::setupVTKWidget()
         // 步骤2：创建VTK对象
         renderer = vtkSmartPointer<vtkRenderer>::New();
         renderer->SetBackground(0.1, 0.2, 0.4); // 深蓝色背景
+        
+        // 重新启用光照但禁用阴影
+        setupEnhancedRendering();
 
         // 步骤3：获取QVTKOpenGLWidget的渲染窗口
         renderWindow = vtkWidget->GetRenderWindow();
@@ -250,12 +255,12 @@ void MainWindow::setupRegionControlPanel()
     
     mriOpacitySpinBox = new QSpinBox();
     mriOpacitySpinBox->setRange(0, 100);
-    mriOpacitySpinBox->setValue(30);  // 默认30%透明度
+    mriOpacitySpinBox->setValue(100);  // 默认100%不透明
     mriOpacitySpinBox->setSuffix("%");
     
     mriOpacitySlider = new QSlider(Qt::Horizontal);
     mriOpacitySlider->setRange(0, 100);
-    mriOpacitySlider->setValue(30);
+    mriOpacitySlider->setValue(100);  // 默认100%不透明
     
     opacityLayout->addWidget(mriOpacitySlider);
     opacityLayout->addWidget(mriOpacitySpinBox);
@@ -563,4 +568,81 @@ void MainWindow::updateActionStates()
         mriPreviewCheckBox->setEnabled(false);
         mriPreviewCheckBox->setChecked(true);
     }
+}
+
+void MainWindow::setupEnhancedRendering()
+{
+    if (!renderer) return;
+    
+    // 移除默认光源以便自定义光照
+    renderer->RemoveAllLights();
+    
+    // 创建主光源（关键光）- 降低强度
+    auto keyLight = vtkSmartPointer<vtkLight>::New();
+    keyLight->SetLightTypeToSceneLight();
+    keyLight->SetPosition(2.0, 2.0, 1.0);  // 右上前方
+    keyLight->SetFocalPoint(0.0, 0.0, 0.0);
+    keyLight->SetColor(1.0, 1.0, 1.0);     // 白光
+    keyLight->SetIntensity(0.5);           // 降低强度从0.8到0.5
+    keyLight->SetConeAngle(45);            // 增大聚光角度，让光更柔和
+    renderer->AddLight(keyLight);
+    
+    // 创建填充光（减少阴影）- 提高强度
+    auto fillLight = vtkSmartPointer<vtkLight>::New();
+    fillLight->SetLightTypeToSceneLight();
+    fillLight->SetPosition(-1.0, 1.0, 0.5);  // 左上前方
+    fillLight->SetFocalPoint(0.0, 0.0, 0.0);
+    fillLight->SetColor(0.9, 0.95, 1.0);     // 稍微偏蓝的光
+    fillLight->SetIntensity(0.5);            // 提高强度从0.4到0.5
+    renderer->AddLight(fillLight);
+    
+    // 创建轮廓光（增强立体感）- 提高强度
+    auto rimLight = vtkSmartPointer<vtkLight>::New();
+    rimLight->SetLightTypeToSceneLight();
+    rimLight->SetPosition(-2.0, -1.0, -1.0);  // 左下后方
+    rimLight->SetFocalPoint(0.0, 0.0, 0.0);
+    rimLight->SetColor(0.8, 0.9, 1.0);       // 冷色调
+    rimLight->SetIntensity(0.4);             // 提高强度从0.3到0.4
+    renderer->AddLight(rimLight);
+    
+    // 添加对向光（与主光源对称，保证全局光照充足）- 提高强度
+    auto backLight = vtkSmartPointer<vtkLight>::New();
+    backLight->SetLightTypeToSceneLight();
+    backLight->SetPosition(-2.0, -2.0, -1.0);  // 左下后方（与主光源对向）
+    backLight->SetFocalPoint(0.0, 0.0, 0.0);
+    backLight->SetColor(0.95, 0.95, 1.0);      // 稍冷的白光
+    backLight->SetIntensity(0.5);              // 提高强度从0.4到0.5
+    renderer->AddLight(backLight);
+    
+    // 添加顶部光源（从上方照亮，减少顶部阴影）- 提高强度
+    auto topLight = vtkSmartPointer<vtkLight>::New();
+    topLight->SetLightTypeToSceneLight();
+    topLight->SetPosition(0.0, 3.0, 1.0);     // 正上方
+    topLight->SetFocalPoint(0.0, 0.0, 0.0);
+    topLight->SetColor(1.0, 1.0, 0.95);       // 稍暖的白光
+    topLight->SetIntensity(0.4);             // 提高强度从0.35到0.4
+    renderer->AddLight(topLight);
+    
+    // 禁用阴影以避免黑斑问题
+    renderer->SetUseShadows(false);
+    
+    // 设置更好的渲染质量
+    if (renderer->GetRenderWindow()) {
+        auto renderWindow = renderer->GetRenderWindow();
+        renderWindow->SetMultiSamples(4);    // 4x抗锯齿
+        renderWindow->LineSmoothingOn();     // 线条平滑
+        renderWindow->PolygonSmoothingOn();  // 多边形平滑
+        
+        // 启用透明度支持
+        renderWindow->SetAlphaBitPlanes(1);  // 启用Alpha通道
+    }
+    
+    // 启用透明度支持的关键设置
+    renderer->SetUseDepthPeeling(0);         // 禁用复杂的深度剥离
+    renderer->SetUseFXAA(false);             // 禁用FXAA以避免透明度问题
+    
+    // 确保渲染器支持透明度
+    renderer->GetActiveCamera()->SetClippingRange(0.1, 1000.0);  // 设置合理的裁剪范围
+    
+    qDebug() << "已设置增强渲染选项：多光源、阴影、抗锯齿、透明度支持";
 } 

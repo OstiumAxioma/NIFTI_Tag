@@ -461,17 +461,23 @@ void BrainRegionVolume::setupSurfaceProperty()
         // 设置基本颜色，使用当前color成员变量
         property->SetColor(color.redF(), color.greenF(), color.blueF());
         
-        // 设置光照属性
-        property->SetAmbient(0.3);
-        property->SetDiffuse(0.7);
-        property->SetSpecular(0.2);
-        property->SetSpecularPower(10);
+        // 设置高环境光以避免黑斑
+        property->SetAmbient(0.5);     // 高环境光，确保无黑斑
+        property->SetDiffuse(0.5);     // 平衡漫反射
+        property->SetSpecular(0.2);    // 轻微的镜面反射
+        property->SetSpecularPower(15); // 适中的高光聚焦度
         
         // 设置不透明度（完全不透明）
         property->SetOpacity(1.0);
         
-        // 强制设置为独立属性（不共享）
+        // 使用Gouraud光照模型，避免Phong光照的强对比
         property->SetInterpolationToGouraud();
+        
+        // 启用背面消隐以提升性能和视觉效果
+        property->BackfaceCullingOn();
+        
+        // 关闭边缘可见性以获得平滑效果
+        property->EdgeVisibilityOff();
         
         // 确保使用固定颜色而不是标量颜色
         // VTK Property本身不需要设置标量可见性，这由Mapper控制
@@ -500,17 +506,23 @@ void BrainRegionVolume::updateSurfaceColor()
         // 设置颜色
         property->SetColor(color.redF(), color.greenF(), color.blueF());
         
-        // 设置光照属性
-        property->SetAmbient(0.3);
-        property->SetDiffuse(0.7);
-        property->SetSpecular(0.2);
-        property->SetSpecularPower(10);
+        // 设置高环境光以避免黑斑
+        property->SetAmbient(0.5);     // 高环境光，确保无黑斑
+        property->SetDiffuse(0.5);     // 平衡漫反射
+        property->SetSpecular(0.2);    // 轻微的镜面反射
+        property->SetSpecularPower(15); // 适中的高光聚焦度
         
         // 设置不透明度（完全不透明）
         property->SetOpacity(1.0);
         
-        // 强制设置为独立属性（不共享）
+        // 使用Gouraud光照模型，避免Phong光照的强对比
         property->SetInterpolationToGouraud();
+        
+        // 启用背面消隐以提升性能和视觉效果
+        property->BackfaceCullingOn();
+        
+        // 关闭边缘可见性以获得平滑效果
+        property->EdgeVisibilityOff();
         
         // 将属性设置给actor
         surfaceActor->SetProperty(property);

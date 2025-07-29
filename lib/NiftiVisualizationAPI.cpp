@@ -33,7 +33,7 @@ public:
         , currentMinGrayValue(0.0)
         , currentMaxGrayValue(0.0)
         , useGrayValueLimits(false)
-        , mriPreviewOpacity(0.3)
+        , mriPreviewOpacity(1.0)  // 默认完全不透明
     {
         // 创建内部NIFTI管理器
         niftiManager = new NiftiManager(q);
@@ -369,13 +369,23 @@ void NiftiVisualizationAPI::renderSingleVolume(vtkImageData* imageData, const QC
         auto actor = vtkSmartPointer<vtkActor>::New();
         actor->SetMapper(mapper);
         
-        // 设置材质属性
-        actor->GetProperty()->SetColor(color.redF(), color.greenF(), color.blueF());
-        actor->GetProperty()->SetOpacity(1.0);  // 完全不透明
-        actor->GetProperty()->SetAmbient(0.3);   // 环境光
-        actor->GetProperty()->SetDiffuse(0.7);   // 漫反射
-        actor->GetProperty()->SetSpecular(0.2);  // 镜面反射
-        actor->GetProperty()->SetSpecularPower(10);
+        // 设置增强的材质属性
+        auto property = actor->GetProperty();
+        property->SetColor(color.redF(), color.greenF(), color.blueF());
+        property->SetOpacity(1.0);  // 完全不透明
+        
+        // 使用高环境光以避免黑斑
+        property->SetAmbient(0.5);     // 高环境光，确保无黑斑
+        property->SetDiffuse(0.5);     // 平衡漫反射
+        property->SetSpecular(0.2);    // 轻微的镜面反射
+        property->SetSpecularPower(15); // 适中的高光聚焦度
+        
+        // 使用Gouraud光照模型，避免Phong光照的强对比
+        property->SetInterpolationToGouraud();
+        
+        // 启用背面消隐和优化设置
+        property->BackfaceCullingOn();
+        property->EdgeVisibilityOff();
         
         // 添加到渲染器
         d->renderer->AddActor(actor);
@@ -418,21 +428,23 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
         auto marchingCubes = vtkSmartPointer<vtkMarchingCubes>::New();
         marchingCubes->SetInputData(imageData);
         
-        // 改进的阈值算法
+        // 更保守的阈值算法，避免产生黑斑
         double threshold;
         double dataRange = effectiveMaxValue - effectiveMinValue;
         
+        qDebug() << "MRI数据分析: 最小值=" << effectiveMinValue << ", 最大值=" << effectiveMaxValue << ", 范围=" << dataRange;
+        
         if (dataRange > 0) {
-            // 根据数据范围选择合适的阈值百分比
+            // 使用更低的阈值百分比来包含更多的脑组织
             if (dataRange > 1000) {
-                threshold = effectiveMinValue + dataRange * 0.35;
+                threshold = effectiveMinValue + dataRange * 0.1;  // 从35%降到10%
             } else if (dataRange > 100) {
-                threshold = effectiveMinValue + dataRange * 0.15;
+                threshold = effectiveMinValue + dataRange * 0.05; // 从15%降到5%
             } else {
-                threshold = effectiveMinValue + dataRange * 0.05;
+                threshold = effectiveMinValue + dataRange * 0.02; // 从5%降到2%
             }
         } else {
-            threshold = effectiveMinValue + 0.1;
+            threshold = effectiveMinValue + 0.01;  // 非常小的偏移
         }
         
         marchingCubes->SetValue(0, threshold);
@@ -534,17 +546,34 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
         try {
             actor->SetMapper(mapper);
             
-            // 设置材质属性（半透明黑白显示）
+            // 设置简单有效的材质属性（半透明黑白显示）
             auto property = actor->GetProperty();
             if (property) {
-                property->SetColor(0.9, 0.9, 0.9);  // 白色或浅灰色
-                property->SetOpacity(d->mriPreviewOpacity);  // 使用可配置的透明度
-                property->SetAmbient(0.3);   // 环境光
-                property->SetDiffuse(0.7);   // 漫反射
-                property->SetSpecular(0.0);  // 关闭镜面反射
-                property->SetSpecularPower(1);
-                // 强制设置为灰度渲染模式
-                property->SetInterpolationToFlat();
+                // 使用固定的白色
+                property->SetColor(0.9, 0.9, 0.9);
+                property->SetOpacity(d->mriPreviewOpacity);  // 直接使用透明度，不做补偿
+                
+                qDebug() << "设置MRI预览透明度为:" << d->mriPreviewOpacity;
+                
+                // 提高环境光以避免黑斑问题
+                property->SetAmbient(0.5);     // 大幅提高环境光，确保无黑斑
+                property->SetDiffuse(0.5);     // 平衡漫反射
+                property->SetSpecular(0.2);    // 轻微的镜面反射
+                property->SetSpecularPower(10);
+                
+                // 使用Gouraud光照模型，避免Phong光照的强对比
+                property->SetInterpolationToGouraud();
+                
+                // 对透明对象始终禁用背面消隐
+                property->BackfaceCullingOff();
+                property->EdgeVisibilityOff();
+                
+                // 确保透明度生效的关键设置
+                if (d->mriPreviewOpacity < 1.0) {
+                    // 对于透明对象，确保正确的混合模式
+                    property->SetRenderPointsAsSpheres(false);
+                    property->SetRenderLinesAsTubes(false);
+                }
             }
             
             qDebug() << "MRI预览actor创建成功";
@@ -774,13 +803,24 @@ void NiftiVisualizationAPI::setMriPreviewOpacity(double opacity)
     if (d->mriPreviewActor) {
         auto property = d->mriPreviewActor->GetProperty();
         if (property) {
+            // 简单直接地设置透明度
             property->SetOpacity(d->mriPreviewOpacity);
+            
+            qDebug() << "更新MRI预览透明度: " << d->mriPreviewOpacity << ", 当前actor可见性: " << d->mriPreviewActor->GetVisibility();
+            
+            // 确保actor可见
+            d->mriPreviewActor->SetVisibility(true);
             
             // 触发重新渲染
             if (d->renderer && d->renderer->GetRenderWindow()) {
                 d->renderer->GetRenderWindow()->Render();
+                qDebug() << "渲染器已更新";
             }
+        } else {
+            qDebug() << "MRI预览actor的property为空";
         }
+    } else {
+        qDebug() << "MRI预览actor不存在，无法设置透明度";
     }
     
     qDebug() << "MRI预览透明度设置为:" << d->mriPreviewOpacity;
