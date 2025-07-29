@@ -62,7 +62,6 @@ private slots:
     void createStatusBar();
     void setupSimpleWidget();
     void setupVTKWidget();
-    void setupEnhancedRendering();
     
     // NIFTI文件导入槽函数（通过API）
     void importMriNiftiFile();
@@ -81,6 +80,7 @@ private slots:
     void onPreviewButtonClicked();
     void onMriPreviewToggled(bool checked);
     void onMriOpacityChanged();
+    void onBackfaceCullingToggled(bool checked);
     
     // API回调响应
     void onNiftiError(const QString& message);
@@ -119,6 +119,7 @@ private:
     QSpinBox *mriOpacitySpinBox;
     QPushButton *previewButton;
     QCheckBox *mriPreviewCheckBox;
+    QCheckBox *backfaceCullingCheckBox;
 
     // VTK组件
     vtkSmartPointer<vtkRenderer> renderer;

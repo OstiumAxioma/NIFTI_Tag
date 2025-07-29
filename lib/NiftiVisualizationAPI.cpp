@@ -9,6 +9,7 @@
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
 #include <vtkCamera.h>
+#include <vtkLight.h>
 #include <vtkImageData.h>
 #include <vtkMarchingCubes.h>
 #include <vtkPolyDataMapper.h>
@@ -34,6 +35,7 @@ public:
         , currentMaxGrayValue(0.0)
         , useGrayValueLimits(false)
         , mriPreviewOpacity(1.0)  // 默认完全不透明
+        , mriPreviewBackfaceCulling(true)  // 默认启用背面消隐
     {
         // 创建内部NIFTI管理器
         niftiManager = new NiftiManager(q);
@@ -81,6 +83,9 @@ public:
     // MRI预览透明度
     double mriPreviewOpacity;
     
+    // MRI预览背面消隐
+    bool mriPreviewBackfaceCulling;
+    
     Q_DECLARE_PUBLIC(NiftiVisualizationAPI)
 };
 
@@ -127,6 +132,12 @@ void NiftiVisualizationAPI::setRenderer(vtkRenderer* renderer)
     Q_D(NiftiVisualizationAPI);
     d->renderer = renderer;
     d->niftiManager->setRenderer(renderer);
+    
+    // 自动应用增强渲染设置
+    if (renderer) {
+        setupEnhancedRendering(renderer);
+        qDebug() << "已为渲染器自动应用增强设置";
+    }
 }
 
 vtkRenderer* NiftiVisualizationAPI::getRenderer() const
@@ -549,14 +560,14 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
             // 设置简单有效的材质属性（半透明黑白显示）
             auto property = actor->GetProperty();
             if (property) {
-                // 使用固定的白色
-                property->SetColor(0.9, 0.9, 0.9);
+                // 使用更深的灰色（调整这个数值让MRI更黑）
+                property->SetColor(0.95, 0.95, 0.95);
                 property->SetOpacity(d->mriPreviewOpacity);  // 直接使用透明度，不做补偿
                 
                 qDebug() << "设置MRI预览透明度为:" << d->mriPreviewOpacity;
                 
-                // 提高环境光以避免黑斑问题
-                property->SetAmbient(0.5);     // 大幅提高环境光，确保无黑斑
+                // 提高环境光以配合更亮的光源
+                property->SetAmbient(0.4);     // 提高环境光让整体更亮
                 property->SetDiffuse(0.5);     // 平衡漫反射
                 property->SetSpecular(0.2);    // 轻微的镜面反射
                 property->SetSpecularPower(10);
@@ -564,8 +575,12 @@ bool NiftiVisualizationAPI::createMriPreviewActor(vtkImageData* imageData, vtkSm
                 // 使用Gouraud光照模型，避免Phong光照的强对比
                 property->SetInterpolationToGouraud();
                 
-                // 对透明对象始终禁用背面消隐
-                property->BackfaceCullingOff();
+                // 根据用户设置决定背面消隐
+                if (d->mriPreviewBackfaceCulling) {
+                    property->BackfaceCullingOn();
+                } else {
+                    property->BackfaceCullingOff();
+                }
                 property->EdgeVisibilityOff();
                 
                 // 确保透明度生效的关键设置
@@ -803,8 +818,30 @@ void NiftiVisualizationAPI::setMriPreviewOpacity(double opacity)
     if (d->mriPreviewActor) {
         auto property = d->mriPreviewActor->GetProperty();
         if (property) {
-            // 简单直接地设置透明度
+            // 设置透明度
             property->SetOpacity(d->mriPreviewOpacity);
+            
+            // 关键修复：根据透明度值配置渲染模式
+            if (d->mriPreviewOpacity < 1.0) {
+                // 透明模式：需要特殊配置
+                property->SetRenderPointsAsSpheres(false);
+                property->SetRenderLinesAsTubes(false);
+                // 透明对象通常需要禁用背面消隐，但仍可由用户控制
+                if (d->mriPreviewBackfaceCulling) {
+                    property->BackfaceCullingOn();
+                } else {
+                    property->BackfaceCullingOff();
+                }
+                qDebug() << "配置透明渲染模式，透明度:" << d->mriPreviewOpacity << "，背面消隐:" << d->mriPreviewBackfaceCulling;
+            } else {
+                // 不透明模式：根据用户设置决定背面消隐
+                if (d->mriPreviewBackfaceCulling) {
+                    property->BackfaceCullingOn();
+                } else {
+                    property->BackfaceCullingOff();
+                }
+                qDebug() << "配置不透明渲染模式，背面消隐:" << d->mriPreviewBackfaceCulling;
+            }
             
             qDebug() << "更新MRI预览透明度: " << d->mriPreviewOpacity << ", 当前actor可见性: " << d->mriPreviewActor->GetVisibility();
             
@@ -830,4 +867,120 @@ double NiftiVisualizationAPI::getMriPreviewOpacity() const
 {
     Q_D(const NiftiVisualizationAPI);
     return d->mriPreviewOpacity;
+}
+
+void NiftiVisualizationAPI::setMriPreviewBackfaceCulling(bool enabled)
+{
+    Q_D(NiftiVisualizationAPI);
+    
+    d->mriPreviewBackfaceCulling = enabled;
+    
+    // 如果MRI预览actor存在，立即更新背面消隐设置
+    if (d->mriPreviewActor) {
+        auto property = d->mriPreviewActor->GetProperty();
+        if (property) {
+            if (enabled) {
+                property->BackfaceCullingOn();
+                qDebug() << "MRI预览背面消隐已启用";
+            } else {
+                property->BackfaceCullingOff();
+                qDebug() << "MRI预览背面消隐已禁用";
+            }
+            
+            // 触发重新渲染
+            if (d->renderer && d->renderer->GetRenderWindow()) {
+                d->renderer->GetRenderWindow()->Render();
+            }
+        }
+    }
+    
+    qDebug() << "MRI预览背面消隐设置为:" << enabled;
+}
+
+bool NiftiVisualizationAPI::getMriPreviewBackfaceCulling() const
+{
+    Q_D(const NiftiVisualizationAPI);
+    return d->mriPreviewBackfaceCulling;
+}
+
+void NiftiVisualizationAPI::setupEnhancedRendering(vtkRenderer* renderer)
+{
+    if (!renderer) return;
+    
+    // 移除默认光源以便自定义光照
+    renderer->RemoveAllLights();
+    
+    // 创建主光源（关键光）- 配置阴影
+    auto keyLight = vtkSmartPointer<vtkLight>::New();
+    keyLight->SetLightTypeToSceneLight();
+    keyLight->SetPosition(2.0, 2.0, 1.0);  // 右上前方
+    keyLight->SetFocalPoint(0.0, 0.0, 0.0);
+    keyLight->SetColor(1.0, 1.0, 1.0);     // 白光
+    keyLight->SetIntensity(0.9);           // 调亮主光源强度
+    keyLight->SetConeAngle(30);            // 减小角度增强阴影对比
+    // VTK 8.2不支持ShadowOn方法，使用其他方式增强立体感
+    renderer->AddLight(keyLight);
+    
+    // 创建填充光（模拟AO效果的对比光）
+    auto fillLight = vtkSmartPointer<vtkLight>::New();
+    fillLight->SetLightTypeToSceneLight();
+    fillLight->SetPosition(-1.0, 1.0, 0.5);  // 左上前方
+    fillLight->SetFocalPoint(0.0, 0.0, 0.0);
+    fillLight->SetColor(0.7, 0.8, 0.9);     // 更冷的蓝色调，模拟环境光
+    fillLight->SetIntensity(0.6);            // 调亮填充光强度
+    renderer->AddLight(fillLight);
+    
+    // 创建轮廓光（增强立体感，模拟AO暗部对比）
+    auto rimLight = vtkSmartPointer<vtkLight>::New();
+    rimLight->SetLightTypeToSceneLight();
+    rimLight->SetPosition(-2.0, -1.0, -1.0);  // 左下后方
+    rimLight->SetFocalPoint(0.0, 0.0, 0.0);
+    rimLight->SetColor(0.4, 0.5, 0.7);       // 更深的冷色调，模拟AO暗部
+    rimLight->SetIntensity(0.4);             // 调亮轮廓光强度
+    renderer->AddLight(rimLight);
+    
+    // 添加对向光（保证全局光照充足）
+    auto backLight = vtkSmartPointer<vtkLight>::New();
+    backLight->SetLightTypeToSceneLight();
+    backLight->SetPosition(-2.0, -2.0, -1.0);  // 左下后方（与主光源对向）
+    backLight->SetFocalPoint(0.0, 0.0, 0.0);
+    backLight->SetColor(0.95, 0.95, 1.0);      // 稍冷的白光
+    backLight->SetIntensity(0.7);              // 调亮对向光强度
+    renderer->AddLight(backLight);
+    
+    // 添加顶部光源（减少顶部阴影）
+    auto topLight = vtkSmartPointer<vtkLight>::New();
+    topLight->SetLightTypeToSceneLight();
+    topLight->SetPosition(0.0, 3.0, 1.0);     // 正上方
+    topLight->SetFocalPoint(0.0, 0.0, 0.0);
+    topLight->SetColor(1.0, 1.0, 0.95);       // 稍暖的白光
+    topLight->SetIntensity(0.6);             // 调亮顶部光强度
+    renderer->AddLight(topLight);
+    
+    // VTK 8.2阴影支持有限，通过光照配置增强立体感
+    renderer->SetUseShadows(false);  // 保持禁用以避免兼容性问题
+    
+    // 设置高质量渲染选项
+    if (renderer->GetRenderWindow()) {
+        auto renderWindow = renderer->GetRenderWindow();
+        renderWindow->SetMultiSamples(4);    // 4x抗锯齿
+        renderWindow->LineSmoothingOn();     // 线条平滑
+        renderWindow->PolygonSmoothingOn();  // 多边形平滑
+        
+        // 启用透明度支持
+        renderWindow->SetAlphaBitPlanes(1);  // 启用Alpha通道
+    }
+    
+    // VTK 8.2不支持SetUseSSAO，使用光照配置模拟AO效果
+    
+    // 透明度渲染设置 - 启用深度剥离技术
+    renderer->SetUseDepthPeeling(1);         // 启用深度剥离解决透明度重合问题
+    renderer->SetMaximumNumberOfPeels(4);    // 设置最大剥离层数
+    renderer->SetOcclusionRatio(0.1);        // 设置遮挡比例阈值
+    renderer->SetUseFXAA(false);             // 禁用FXAA以避免透明度问题
+    
+    // 设置合理的相机裁剪范围
+    renderer->GetActiveCamera()->SetClippingRange(0.1, 1000.0);
+    
+    qDebug() << "静态库已自动应用增强渲染设置：多光源、抗锯齿、深度剥离透明度支持";
 } 

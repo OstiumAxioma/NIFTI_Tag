@@ -263,6 +263,18 @@ public:
      * @return 当前透明度值 (0.0-1.0)
      */
     double getMriPreviewOpacity() const;
+    
+    /**
+     * @brief 设置MRI预览的背面消隐
+     * @param enabled 是否启用背面消隐
+     */
+    void setMriPreviewBackfaceCulling(bool enabled);
+    
+    /**
+     * @brief 获取MRI预览的背面消隐状态
+     * @return 是否启用背面消隐
+     */
+    bool getMriPreviewBackfaceCulling() const;
 
 signals:
     /**
@@ -291,6 +303,7 @@ private:
     // 私有辅助方法
     void renderSingleVolume(vtkImageData* imageData, const QColor& color, const QString& name);
     bool createMriPreviewActor(vtkImageData* imageData, vtkSmartPointer<vtkActor> actor);
+    void setupEnhancedRendering(vtkRenderer* renderer);
 };
 
 #endif // NIFTIVISUALIZATIONAPI_H 

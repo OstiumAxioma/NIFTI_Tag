@@ -461,8 +461,8 @@ void BrainRegionVolume::setupSurfaceProperty()
         // 设置基本颜色，使用当前color成员变量
         property->SetColor(color.redF(), color.greenF(), color.blueF());
         
-        // 设置高环境光以避免黑斑
-        property->SetAmbient(0.5);     // 高环境光，确保无黑斑
+        // 提高环境光以配合更亮的整体光源
+        property->SetAmbient(0.4);     // 提高环境光让整体更亮
         property->SetDiffuse(0.5);     // 平衡漫反射
         property->SetSpecular(0.2);    // 轻微的镜面反射
         property->SetSpecularPower(15); // 适中的高光聚焦度
@@ -506,8 +506,8 @@ void BrainRegionVolume::updateSurfaceColor()
         // 设置颜色
         property->SetColor(color.redF(), color.greenF(), color.blueF());
         
-        // 设置高环境光以避免黑斑
-        property->SetAmbient(0.5);     // 高环境光，确保无黑斑
+        // 提高环境光以配合更亮的整体光源
+        property->SetAmbient(0.4);     // 提高环境光让整体更亮
         property->SetDiffuse(0.5);     // 平衡漫反射
         property->SetSpecular(0.2);    // 轻微的镜面反射
         property->SetSpecularPower(15); // 适中的高光聚焦度
